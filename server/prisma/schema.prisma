@@ -1,0 +1,83 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            Int             @id @default(autoincrement())
+  handle        String          @unique
+  rating        Int?
+  maxRating     Int?
+  rank          String?
+  maxRank       String?
+  avatar        String?
+  titlePhoto    String?
+  organization  String?
+  country       String?
+  contribution  Int?
+  friendOfCount Int?
+  targetRating  Int             @default(1400)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  submissions   CFSubmission[]
+  ratingChanges CFRatingChange[]
+  coachTasks    CoachTask[]
+}
+
+model CFSubmission {
+  id                  Int      @id // Codeforces submission id
+  contestId           Int?
+  creationTimeSeconds Int
+  relativeTimeSeconds Int
+  problemIndex        String
+  problemName         String
+  problemType         String
+  problemRating       Int?
+  problemTags         String[]
+  programmingLanguage String
+  verdict             String?
+  timeConsumedMillis  Int?
+  memoryConsumedBytes Int?
+  userHandle          String
+  user                User     @relation(fields: [userHandle], references: [handle], onDelete: Cascade)
+}
+
+model CFRatingChange {
+  id                      String   @id @default(uuid())
+  contestId               Int
+  contestName             String
+  handle                  String
+  rank                    Int
+  ratingUpdateTimeSeconds Int
+  oldRating               Int
+  newRating               Int
+  user                    User     @relation(fields: [handle], references: [handle], onDelete: Cascade)
+
+  @@unique([handle, contestId])
+}
+
+model CoachTask {
+  id         String   @id @default(uuid())
+  title      String
+  category   String
+  difficulty Int
+  completed  Boolean  @default(false)
+  desc       String
+  userHandle String
+  user       User     @relation(fields: [userHandle], references: [handle], onDelete: Cascade)
+}
+
+model CFProblem {
+  id         String   @id // Formatted as "contestId-index" (e.g. "1915-D")
+  contestId  Int
+  index      String
+  name       String
+  type       String
+  rating     Int?
+  tags       String[]
+}
+
