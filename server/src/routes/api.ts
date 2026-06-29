@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getCodeforcesData, syncCodeforcesProblems, generatePersonalizedTasks, askAICoach } from '../services/codeforcesService';
 import prisma from '../db';
 import { CFProblem } from '@prisma/client';
+import { fetchLeetCodeStats } from '../services/leetcodeService';
 
 const router = Router();
 
@@ -201,6 +202,151 @@ router.post('/user/:handle/ai-coach', async (req: Request, res: Response): Promi
   try {
     const aiResponse = await askAICoach(handle, message, history || []);
     res.json({ status: 'OK', result: aiResponse });
+  } catch (error: any) {
+    res.status(500).json({ status: 'FAILED', comment: error.message });
+  }
+});
+
+// POST link LeetCode handle
+router.post('/user/:handle/leetcode/link', async (req: Request, res: Response): Promise<void> => {
+  const { handle } = req.params;
+  const { leetcodeHandle } = req.body;
+
+  if (typeof handle !== 'string') {
+    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
+    return;
+  }
+
+  if (!leetcodeHandle || typeof leetcodeHandle !== 'string') {
+    res.status(400).json({ status: 'FAILED', comment: 'leetcodeHandle is required and must be a string' });
+    return;
+  }
+
+  try {
+    // 1. Verify user exists in our DB
+    const normHandle = handle.toLowerCase();
+    const dbUser = await prisma.user.findUnique({
+      where: { handle: normHandle }
+    });
+
+    if (!dbUser) {
+      res.status(404).json({ status: 'FAILED', comment: `Codeforces user ${handle} not found. Load their profile first.` });
+      return;
+    }
+
+    // 2. Fetch LeetCode stats to verify handle is valid
+    console.log(`[LeetCode Link] Verifying handle "${leetcodeHandle}"...`);
+    const stats = await fetchLeetCodeStats(leetcodeHandle);
+
+    // 3. Save to database
+    const updatedUser = await prisma.user.update({
+      where: { handle: normHandle },
+      data: {
+        leetcodeHandle: leetcodeHandle.trim(),
+        leetcodeEasy: stats.easy,
+        leetcodeMedium: stats.medium,
+        leetcodeHard: stats.hard,
+        leetcodeRating: stats.rating,
+        leetcodeContests: stats.contests
+      }
+    });
+
+    res.json({
+      status: 'OK',
+      result: {
+        leetcodeHandle: updatedUser.leetcodeHandle,
+        leetcodeEasy: updatedUser.leetcodeEasy,
+        leetcodeMedium: updatedUser.leetcodeMedium,
+        leetcodeHard: updatedUser.leetcodeHard,
+        leetcodeRating: updatedUser.leetcodeRating,
+        leetcodeContests: updatedUser.leetcodeContests
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ status: 'FAILED', comment: error.message });
+  }
+});
+
+// POST sync LeetCode stats
+router.post('/user/:handle/leetcode/sync', async (req: Request, res: Response): Promise<void> => {
+  const { handle } = req.params;
+
+  if (typeof handle !== 'string') {
+    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
+    return;
+  }
+
+  try {
+    const normHandle = handle.toLowerCase();
+    const dbUser = await prisma.user.findUnique({
+      where: { handle: normHandle }
+    });
+
+    if (!dbUser || !dbUser.leetcodeHandle) {
+      res.status(400).json({ status: 'FAILED', comment: 'No LeetCode handle linked for this user' });
+      return;
+    }
+
+    console.log(`[LeetCode Sync] Syncing stats for "${dbUser.leetcodeHandle}"...`);
+    const stats = await fetchLeetCodeStats(dbUser.leetcodeHandle);
+
+    const updatedUser = await prisma.user.update({
+      where: { handle: normHandle },
+      data: {
+        leetcodeEasy: stats.easy,
+        leetcodeMedium: stats.medium,
+        leetcodeHard: stats.hard,
+        leetcodeRating: stats.rating,
+        leetcodeContests: stats.contests
+      }
+    });
+
+    res.json({
+      status: 'OK',
+      result: {
+        leetcodeHandle: updatedUser.leetcodeHandle,
+        leetcodeEasy: updatedUser.leetcodeEasy,
+        leetcodeMedium: updatedUser.leetcodeMedium,
+        leetcodeHard: updatedUser.leetcodeHard,
+        leetcodeRating: updatedUser.leetcodeRating,
+        leetcodeContests: updatedUser.leetcodeContests
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ status: 'FAILED', comment: error.message });
+  }
+});
+
+// POST unlink LeetCode handle
+router.post('/user/:handle/leetcode/unlink', async (req: Request, res: Response): Promise<void> => {
+  const { handle } = req.params;
+
+  if (typeof handle !== 'string') {
+    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
+    return;
+  }
+
+  try {
+    const normHandle = handle.toLowerCase();
+    await prisma.user.update({
+      where: { handle: normHandle },
+      data: {
+        leetcodeHandle: null,
+        leetcodeEasy: 0,
+        leetcodeMedium: 0,
+        leetcodeHard: 0
+      }
+    });
+
+    res.json({
+      status: 'OK',
+      result: {
+        leetcodeHandle: null,
+        leetcodeEasy: 0,
+        leetcodeMedium: 0,
+        leetcodeHard: 0
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ status: 'FAILED', comment: error.message });
   }

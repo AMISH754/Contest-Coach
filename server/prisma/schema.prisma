@@ -10,6 +10,12 @@ generator client {
 model User {
   id            Int             @id @default(autoincrement())
   handle        String          @unique
+  leetcodeHandle String?        @unique
+  leetcodeEasy   Int            @default(0)
+  leetcodeMedium Int            @default(0)
+  leetcodeHard   Int            @default(0)
+  leetcodeRating Float          @default(0.0)
+  leetcodeContests Int            @default(0)
   rating        Int?
   maxRating     Int?
   rank          String?

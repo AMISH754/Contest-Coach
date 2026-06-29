@@ -167,9 +167,9 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
 
   const getHeatmapColor = (count: number) => {
     if (!count || count === 0) return 'bg-slate-900 border-slate-800';
-    if (count === 1) return 'bg-violet-900/60 border-violet-800';
-    if (count <= 3) return 'bg-violet-700/80 border-violet-600';
-    return 'bg-violet-500 border-violet-400';
+    if (count === 1) return 'bg-cyan-950/65 border-cyan-850';
+    if (count <= 3) return 'bg-cyan-700/60 border-cyan-600';
+    return 'bg-cyan-500 border-cyan-400';
   };
 
   const completedCount = tasks.filter(t => t.completed).length;
@@ -180,12 +180,12 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
       <div className="glass-card p-6 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-6">
         <div className="space-y-2 text-center lg:text-left">
           <h3 className="text-lg font-bold text-white flex items-center justify-center lg:justify-start gap-2">
-            <Zap size={20} className="text-violet-400" />
+            <Zap size={20} className="text-cyan-400" />
             Consistency Streak Tracker
           </h3>
           <p className="text-xs text-slate-400">Practicing regularly is the secret to scaling the ranks. Solve at least 1 problem daily.</p>
           <div className="flex justify-center lg:justify-start items-baseline gap-2 pt-2">
-            <span className="text-4xl font-black text-violet-400">{currentStreak}</span>
+            <span className="text-4xl font-black text-cyan-400">{currentStreak}</span>
             <span className="text-sm text-slate-400 font-semibold">Days Active Streak</span>
           </div>
         </div>
@@ -209,8 +209,8 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
             <div className="flex items-center gap-1">
               <span>Less</span>
               <span className="w-2.5 h-2.5 rounded bg-slate-900 border border-slate-800"></span>
-              <span className="w-2.5 h-2.5 rounded bg-violet-700"></span>
-              <span className="w-2.5 h-2.5 rounded bg-violet-500"></span>
+              <span className="w-2.5 h-2.5 rounded bg-cyan-700"></span>
+              <span className="w-2.5 h-2.5 rounded bg-cyan-500"></span>
               <span>More</span>
             </div>
             <span>Today</span>
@@ -224,7 +224,7 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
         <div className="glass-card p-6 rounded-2xl lg:col-span-2 space-y-4">
           <div className="flex justify-between items-center flex-wrap gap-2">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Calendar size={18} className="text-violet-400" />
+              <Calendar size={18} className="text-cyan-400" />
               Dynamic Weekly Plan
             </h3>
             <div className="flex items-center gap-3">
@@ -234,7 +234,7 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
               <button
                 onClick={handleRegenerate}
                 disabled={regenLoading}
-                className="text-xs font-bold bg-violet-600/20 hover:bg-violet-600/30 text-violet-400 border border-violet-500/25 px-3 py-1 rounded-lg transition-all disabled:opacity-50"
+                className="text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 px-3 py-1 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
               >
                 {regenLoading ? 'Regenerating...' : 'Regenerate Plan'}
               </button>
@@ -246,14 +246,14 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
               <div 
                 key={task.id}
                 onClick={() => toggleTask(task.id)}
-                className={`glass-panel p-4 rounded-xl border cursor-pointer flex items-start gap-4 transition-all hover:bg-slate-800/20 ${task.completed ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-slate-800 hover:border-violet-500/20'}`}
+                className={`glass-panel p-4 rounded-xl border cursor-pointer flex items-start gap-4 transition-all hover:bg-slate-800/20 ${task.completed ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-slate-800 hover:border-cyan-500/20'}`}
               >
                 <div className="mt-1">
                   <input 
                     type="checkbox" 
                     checked={task.completed} 
                     onChange={() => {}} // toggled by parent div click
-                    className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-violet-500 cursor-pointer focus:ring-0 focus:ring-offset-0"
+                    className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-cyan-500 cursor-pointer focus:ring-0 focus:ring-offset-0"
                   />
                 </div>
                 <div className="flex-1 space-y-1">
@@ -290,29 +290,29 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
                 <span className="text-rose-400 font-extrabold">Highly Recommended</span>
               </div>
               <p className="text-xs text-slate-400">Focus: Knapsack variations, Digit DP basics, State compression. Recommended problem target range: <span className="font-bold text-slate-300">{currentRating + 100} - {currentRating + 300}</span>.</p>
-              <button className="text-xs font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 pt-1">
+              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
                 Begin Plan <ChevronRight size={14} />
               </button>
             </div>
 
-            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-violet-500/20 transition-all">
+            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-cyan-500/20 transition-all">
               <div className="flex justify-between text-xs">
                 <span className="font-bold text-white">Graph Traversals (DFS/BFS)</span>
                 <span className="text-slate-400">Standard Path</span>
               </div>
               <p className="text-xs text-slate-400">Focus: Connected components, Tree diameters, Shortest path trees. Target rating: <span className="font-bold text-slate-300">{currentRating}</span>.</p>
-              <button className="text-xs font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 pt-1">
+              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
                 Begin Plan <ChevronRight size={14} />
               </button>
             </div>
 
-            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-violet-500/20 transition-all">
+            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-cyan-500/20 transition-all">
               <div className="flex justify-between text-xs">
                 <span className="font-bold text-white">Binary Search on Answer</span>
                 <span className="text-slate-400">Advanced Drill</span>
               </div>
               <p className="text-xs text-slate-400">Focus: Monotonicity identification, Floating-point search. Target rating: <span className="font-bold text-slate-300">{currentRating + 150}</span>.</p>
-              <button className="text-xs font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 pt-1">
+              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
                 Begin Plan <ChevronRight size={14} />
               </button>
             </div>

@@ -109,7 +109,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
       {/* 1. Comparison Handle Search */}
       <div className="glass-card p-6 rounded-2xl space-y-4">
         <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Users size={20} className="text-violet-400" />
+          <Users size={20} className="text-cyan-400" />
           Compare Handles Side-by-Side
         </h3>
         <p className="text-xs text-slate-400">Search another Codeforces user handle to overlay stats, rating history, and performance comparison.</p>
@@ -128,7 +128,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
           </div>
           <button 
             type="submit" 
-            className="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-bold px-5 py-2.5 rounded-xl transition-all text-sm flex items-center gap-2"
+            className="bg-[#06b6d4] hover:bg-cyan-400 disabled:bg-cyan-800 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition-all text-sm flex items-center gap-2 cursor-pointer"
             disabled={loading}
           >
             {loading ? 'Fetching...' : 'Compare'}
@@ -144,15 +144,15 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
       {compareUser && compareStats && (
         <div className="grid grid-cols-1 md:grid-cols-7 items-center gap-6">
           {/* Primary User Card */}
-          <div className="glass-card p-6 rounded-2xl md:col-span-3 text-center space-y-4 border-violet-500/20">
+          <div className="glass-card p-6 rounded-2xl md:col-span-3 text-center space-y-4 border-cyan-500/20">
             <img 
               src={primaryUser.avatar} 
               alt={primaryUser.handle} 
-              className="w-16 h-16 rounded-full border-2 border-violet-500 mx-auto bg-slate-900"
+              className="w-16 h-16 rounded-full border-2 border-cyan-500 mx-auto bg-slate-900"
             />
             <div>
               <h4 className="font-black text-white text-lg">{primaryUser.handle}</h4>
-              <span className="text-xs text-violet-400 uppercase font-semibold">{primaryUser.rank}</span>
+              <span className="text-xs text-cyan-400 uppercase font-semibold">{primaryUser.rank}</span>
             </div>
             
             <div className="space-y-2 pt-2 border-t border-slate-900 text-sm">
@@ -177,7 +177,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
 
           {/* VS Divider */}
           <div className="flex justify-center md:col-span-1">
-            <div className="w-12 h-12 rounded-full bg-violet-600 text-white flex items-center justify-center font-black shadow-lg shadow-violet-900/30">
+            <div className="w-12 h-12 rounded-full bg-[#06b6d4] text-slate-950 flex items-center justify-center font-black shadow-lg shadow-cyan-500/10">
               VS
             </div>
           </div>
@@ -226,9 +226,9 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
                 <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '8px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#080e1a', border: '1px solid #121e35', borderRadius: '8px' }} />
                 <Legend />
-                <Line type="monotone" dataKey={primaryUser.handle} stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 2 }} connectNulls />
+                <Line type="monotone" dataKey={primaryUser.handle} stroke="#06b6d4" strokeWidth={2.5} dot={{ r: 2 }} connectNulls />
                 <Line type="monotone" dataKey={compareUser.handle} stroke="#10b981" strokeWidth={2.5} dot={{ r: 2 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
@@ -247,7 +247,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
             <div className="glass-panel p-4 rounded-xl flex justify-between items-center text-sm">
               <span className="text-slate-400 font-semibold">Active Rating</span>
               <div className="flex gap-4 font-bold">
-                <span className={primaryStats.rating >= compareStats.rating ? 'text-violet-400' : 'text-slate-600'}>
+                <span className={primaryStats.rating >= compareStats.rating ? 'text-cyan-400' : 'text-slate-600'}>
                   {primaryUser.handle} ({primaryStats.rating})
                 </span>
                 <span className="text-slate-500">vs</span>
@@ -261,7 +261,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
             <div className="glass-panel p-4 rounded-xl flex justify-between items-center text-sm">
               <span className="text-slate-400 font-semibold">Problems Solved</span>
               <div className="flex gap-4 font-bold">
-                <span className={primaryStats.solved >= compareStats.solved ? 'text-violet-400' : 'text-slate-600'}>
+                <span className={primaryStats.solved >= compareStats.solved ? 'text-cyan-400' : 'text-slate-600'}>
                   {primaryUser.handle} ({primaryStats.solved})
                 </span>
                 <span className="text-slate-500">vs</span>
@@ -275,7 +275,7 @@ export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistor
             <div className="glass-panel p-4 rounded-xl flex justify-between items-center text-sm">
               <span className="text-slate-400 font-semibold">Accuracy / Success Rate</span>
               <div className="flex gap-4 font-bold">
-                <span className={primaryStats.successRate >= compareStats.successRate ? 'text-violet-400' : 'text-slate-600'}>
+                <span className={primaryStats.successRate >= compareStats.successRate ? 'text-cyan-400' : 'text-slate-600'}>
                   {primaryUser.handle} ({primaryStats.successRate.toFixed(1)}%)
                 </span>
                 <span className="text-slate-500">vs</span>

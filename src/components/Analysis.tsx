@@ -230,29 +230,29 @@ export const Analysis: React.FC<AnalysisProps> = ({ userInfo, ratingHistory, sub
       {/* 4. Recommendations Panel */}
       <div className="glass-card p-6 rounded-2xl space-y-4">
         <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <BookOpen size={18} className="text-violet-400" />
+          <BookOpen size={18} className="text-cyan-400" />
           Recommended Unsolved Problems
         </h3>
         <p className="text-xs text-slate-400">These unsolved problems fit your current rating range and target your weak tags:</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {recsLoading ? (
             <div className="col-span-2 text-center py-6 text-slate-500 text-sm flex flex-col items-center justify-center gap-2">
-              <span className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></span>
+              <span className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></span>
               <span>Loading dynamic CP recommendations...</span>
             </div>
           ) : (
             recommendations.slice(0, 4).map((prob, idx) => (
-              <div key={idx} className="glass-panel p-4 rounded-xl flex justify-between items-center hover:border-violet-500/30 transition-all">
+              <div key={idx} className="glass-panel p-4 rounded-xl flex justify-between items-center hover:border-cyan-500/30 transition-all">
                 <div className="space-y-1 pr-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs bg-slate-900 text-violet-400 px-2 py-0.5 rounded font-black border border-violet-500/10">
+                    <span className="text-xs bg-slate-900 text-cyan-400 px-2 py-0.5 rounded font-black border border-cyan-500/10">
                       {prob.contestId}{prob.index}
                     </span>
                     <a 
                       href={`https://codeforces.com/problemset/problem/${prob.contestId}/${prob.index}`} 
                       target="_blank" 
                       rel="noreferrer"
-                      className="font-semibold text-white hover:text-violet-300 hover:underline text-sm truncate max-w-[150px] sm:max-w-[250px]"
+                      className="font-semibold text-white hover:text-cyan-300 hover:underline text-sm truncate max-w-[150px] sm:max-w-[250px]"
                     >
                       {prob.name}
                     </a>

@@ -10,6 +10,12 @@ export interface CFUserInfo {
   country?: string;
   contribution?: number;
   friendOfCount?: number;
+  leetcodeHandle?: string;
+  leetcodeEasy?: number;
+  leetcodeMedium?: number;
+  leetcodeHard?: number;
+  leetcodeRating?: number;
+  leetcodeContests?: number;
 }
 
 export interface CFRatingChange {
@@ -234,5 +240,62 @@ export const sendAICoachMessage = async (handle: string, message: string, histor
     throw new Error(json.comment || 'Failed to get response from AI Coach');
   }
   return json.result as string;
+};
+
+export const linkLeetCodeProfile = async (handle: string, leetcodeHandle: string) => {
+  const BACKEND_URL = 'http://localhost:5000';
+  const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leetcodeHandle })
+  });
+  const json = await response.json();
+  if (json.status !== 'OK') {
+    throw new Error(json.comment || 'Failed to link LeetCode profile');
+  }
+  return json.result as {
+    leetcodeHandle: string;
+    leetcodeEasy: number;
+    leetcodeMedium: number;
+    leetcodeHard: number;
+    leetcodeRating: number;
+    leetcodeContests: number;
+  };
+};
+
+export const syncLeetCodeProfile = async (handle: string) => {
+  const BACKEND_URL = 'http://localhost:5000';
+  const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/sync`, {
+    method: 'POST',
+  });
+  const json = await response.json();
+  if (json.status !== 'OK') {
+    throw new Error(json.comment || 'Failed to sync LeetCode profile');
+  }
+  return json.result as {
+    leetcodeHandle: string;
+    leetcodeEasy: number;
+    leetcodeMedium: number;
+    leetcodeHard: number;
+    leetcodeRating: number;
+    leetcodeContests: number;
+  };
+};
+
+export const unlinkLeetCodeProfile = async (handle: string) => {
+  const BACKEND_URL = 'http://localhost:5000';
+  const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/unlink`, {
+    method: 'POST',
+  });
+  const json = await response.json();
+  if (json.status !== 'OK') {
+    throw new Error(json.comment || 'Failed to unlink LeetCode profile');
+  }
+  return json.result as {
+    leetcodeHandle: null;
+    leetcodeEasy: 0;
+    leetcodeMedium: 0;
+    leetcodeHard: 0;
+  };
 };
 

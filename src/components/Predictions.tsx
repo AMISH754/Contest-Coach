@@ -57,7 +57,7 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
     { name: 'Pupil', rating: 1200, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
     { name: 'Specialist', rating: 1400, color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
     { name: 'Expert', rating: 1600, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
-    { name: 'Candidate Master', rating: 1900, color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
+    { name: 'Candidate Master', rating: 1900, color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
     { name: 'Master', rating: 2100, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
     { name: 'Grandmaster', rating: 2400, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' },
     { name: 'Legendary Grandmaster', rating: 3000, color: 'text-rose-500 font-extrabold', bg: 'bg-rose-500/15', border: 'border-rose-500/30' },
@@ -80,7 +80,7 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Target size={20} className="text-violet-400" />
+              <Target size={20} className="text-cyan-400" />
               Interactive Goal Estimator
             </h3>
             <p className="text-xs text-slate-400">Drag the slider to set your target rating and calculate practice requirements:</p>
@@ -90,9 +90,9 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
               <span className="text-[10px] text-slate-400 block uppercase font-semibold">Current</span>
               <span className="text-lg font-black text-white">{currentRating}</span>
             </div>
-            <div className="glass-panel px-4 py-2 rounded-xl text-center border-violet-500/30">
-              <span className="text-[10px] text-violet-400 block uppercase font-semibold">Target</span>
-              <span className="text-lg font-black text-violet-400">{targetRating}</span>
+            <div className="glass-panel px-4 py-2 rounded-xl text-center border-cyan-500/30">
+              <span className="text-[10px] text-cyan-400 block uppercase font-semibold">Target</span>
+              <span className="text-lg font-black text-cyan-400">{targetRating}</span>
             </div>
           </div>
         </div>
@@ -104,7 +104,7 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
             max={Math.min(3000, currentRating + 800)} 
             value={targetRating} 
             onChange={(e) => setTargetRating(parseInt(e.target.value))}
-            className="w-full h-2 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-violet-500"
+            className="w-full h-2 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-cyan-500"
           />
           <div className="flex justify-between text-xs text-slate-500">
             <span>{Math.max(800, currentRating - 200)}</span>
@@ -117,11 +117,11 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
       {/* 2. Estimates Panel */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="glass-card p-6 rounded-2xl text-center space-y-2">
-          <div className="mx-auto w-12 h-12 bg-violet-500/10 text-violet-400 rounded-full flex items-center justify-center">
+          <div className="mx-auto w-12 h-12 bg-cyan-500/10 text-cyan-400 rounded-full flex items-center justify-center">
             <Compass size={24} />
           </div>
           <h4 className="text-sm font-semibold text-slate-400">Est. Contests Needed</h4>
-          <p className="text-3xl font-black text-violet-300">
+          <p className="text-3xl font-black text-cyan-300">
             {ratingDiff <= 0 ? 'Goal Reached!' : `${estContestsNeeded} Contests`}
           </p>
           <p className="text-xs text-slate-500">Based on trend of +{averageGain} rating/contest</p>
@@ -156,7 +156,7 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             📊 Predictive Rating Curve
           </h3>
-          <span className="text-xs bg-slate-900 border border-violet-500/20 text-slate-400 px-2 py-0.5 rounded">
+          <span className="text-xs bg-slate-900 border border-cyan-500/20 text-slate-400 px-2 py-0.5 rounded">
             Linear Regression + Current Gain Model
           </span>
         </div>
@@ -168,12 +168,12 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
                 <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis domain={['dataMin - 100', 'dataMax + 200']} stroke="#64748b" fontSize={11} tickLine={false} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '8px' }}
+                  contentStyle={{ backgroundColor: '#080e1a', border: '1px solid #121e35', borderRadius: '8px' }}
                   formatter={(value, name) => [value, name === 'actual' ? 'Historical Rating' : 'Predicted Rating']}
                 />
-                <ReferenceLine y={currentRating} stroke="rgba(168, 85, 247, 0.4)" strokeDasharray="3 3" label={{ value: 'Current', fill: '#c084fc', fontSize: 10, position: 'insideBottomRight' }} />
+                <ReferenceLine y={currentRating} stroke="rgba(6, 182, 212, 0.4)" strokeDasharray="3 3" label={{ value: 'Current', fill: '#06b6d4', fontSize: 10, position: 'insideBottomRight' }} />
                 <ReferenceLine y={targetRating} stroke="rgba(16, 185, 129, 0.4)" strokeDasharray="3 3" label={{ value: 'Target', fill: '#34d399', fontSize: 10, position: 'insideTopRight' }} />
-                <Line type="monotone" dataKey="actual" stroke="#c084fc" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="actual" stroke="#06b6d4" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line type="monotone" dataKey="predicted" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -213,7 +213,7 @@ export const Predictions: React.FC<PredictionsProps> = ({ userInfo, ratingHistor
                 {!isCompleted && (
                   <div className="mt-4 pt-3 border-t border-slate-900 flex justify-between items-center text-xs">
                     <span className="text-slate-400">Distance</span>
-                    <span className="font-bold text-violet-400">+{diff} pts</span>
+                    <span className="font-bold text-cyan-400">+{diff} pts</span>
                   </div>
                 )}
               </div>

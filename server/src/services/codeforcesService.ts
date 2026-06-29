@@ -19,6 +19,12 @@ export interface CFUserInfo {
   country?: string;
   contribution?: number;
   friendOfCount?: number;
+  leetcodeHandle?: string;
+  leetcodeEasy?: number;
+  leetcodeMedium?: number;
+  leetcodeHard?: number;
+  leetcodeRating?: number;
+  leetcodeContests?: number;
 }
 
 export interface CFRatingChange {
@@ -209,6 +215,12 @@ export const getCodeforcesData = async (handle: string) => {
             country: dbUser.country || undefined,
             contribution: dbUser.contribution || undefined,
             friendOfCount: dbUser.friendOfCount || undefined,
+            leetcodeHandle: dbUser.leetcodeHandle || undefined,
+            leetcodeEasy: dbUser.leetcodeEasy,
+            leetcodeMedium: dbUser.leetcodeMedium,
+            leetcodeHard: dbUser.leetcodeHard,
+            leetcodeRating: dbUser.leetcodeRating,
+            leetcodeContests: dbUser.leetcodeContests,
           },
           ratingHistory: formattedRatingChanges,
           submissions: formattedSubmissions,
@@ -256,9 +268,10 @@ export const getCodeforcesData = async (handle: string) => {
     const ratingHistory: CFRatingChange[] = ratingRes.status === 'OK' ? ratingRes.result : [];
     const submissions: CFSubmission[] = statusRes.status === 'OK' ? statusRes.result : [];
 
+    let dbUser: any = null;
     // Save/Sync to PostgreSQL Database in background
     try {
-      const dbUser = await prisma.user.upsert({
+      dbUser = await prisma.user.upsert({
         where: { handle: userInfo.handle.toLowerCase() },
         update: {
           rating: userInfo.rating,
@@ -346,7 +359,15 @@ export const getCodeforcesData = async (handle: string) => {
     }
 
     return {
-      userInfo,
+      userInfo: {
+        ...userInfo,
+        leetcodeHandle: dbUser?.leetcodeHandle || undefined,
+        leetcodeEasy: dbUser?.leetcodeEasy || 0,
+        leetcodeMedium: dbUser?.leetcodeMedium || 0,
+        leetcodeHard: dbUser?.leetcodeHard || 0,
+        leetcodeRating: dbUser?.leetcodeRating || 0,
+        leetcodeContests: dbUser?.leetcodeContests || 0,
+      },
       ratingHistory,
       submissions,
       isSimulated: false
@@ -533,20 +554,25 @@ export const askAICoach = async (handle: string, userMessage: string, chatHistor
     .map(c => `${c.contestName}: rank ${c.rank}, rating change: ${c.newRating - c.oldRating} (current rating: ${c.newRating})`)
     .join('\n');
 
-  const systemPrompt = `You are the Contest Coach AI, an expert agentic AI coach for competitive programmers practicing on Codeforces.
+  const leetcodeStatsStr = dbUser.leetcodeHandle
+    ? `- **LeetCode Username**: ${dbUser.leetcodeHandle}\n- **LeetCode Problems Solved**: ${dbUser.leetcodeEasy} Easy, ${dbUser.leetcodeMedium} Medium, ${dbUser.leetcodeHard} Hard (total: ${dbUser.leetcodeEasy + dbUser.leetcodeMedium + dbUser.leetcodeHard})\n- **LeetCode Contest Rating**: ${dbUser.leetcodeRating > 0 ? Math.round(dbUser.leetcodeRating) : 'N/A'}\n- **LeetCode Contests Attended**: ${dbUser.leetcodeContests}`
+    : `- **LeetCode**: No LeetCode account linked.`;
+
+  const systemPrompt = `You are the Contest Coach AI, an expert agentic AI coach for competitive programmers practicing on Codeforces and LeetCode.
 Your goal is to provide highly actionable, context-aware competitive programming advice.
 
-Here is the Codeforces profile context for the user you are coaching:
+Here is the profile context for the user you are coaching:
 - **Handle**: ${dbUser.handle}
 - **Current Rating**: ${currentRating}
 - **Peak Rating**: ${maxRating}
 - **Current Rank**: ${rank}
 - **Recent Submissions Success Rate**: ${successRate}% (total parsed: ${totalSubmissions})
 - **Weak Topics (Identified gaps)**: ${weakTopics || 'None identified yet (need more attempts)'}
+${leetcodeStatsStr}
 - **Recent Contest Performance History**:
 ${ratingChangeStr || 'No recent contest history found.'}
 
-Use this profile context to give personalized answers. If they ask for a plan, reference their actual weak topics. If they ask about their performance, reference their actual contest trajectory.
+Use this profile context to give personalized answers. If they ask for a plan, reference their weak topics or LeetCode counts. If they ask about their performance, reference their actual contest trajectory.
 Structure your answers in markdown. Keep advice practical (e.g. solve problems rated rating+100, analyze time constraints, prove greedy strategies before coding, learn specific algorithms).
 Be encouraging but realistic.`;
 

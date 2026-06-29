@@ -98,7 +98,7 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
       <div className="lg:col-span-1 space-y-4">
         <div className="glass-card p-5 rounded-2xl space-y-3">
           <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-            <Bot size={16} className="text-violet-400" />
+            <Bot size={16} className="text-cyan-400" />
             AI Coach Profile
           </h4>
           <p className="text-xs text-slate-400 leading-relaxed">
@@ -107,12 +107,28 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
           <div className="pt-2 border-t border-slate-900 space-y-2 text-xs">
             <div className="flex justify-between text-slate-400">
               <span>Active Target:</span>
-              <span className="font-bold text-violet-400">Rating +200</span>
+              <span className="font-bold text-cyan-400">Rating +200</span>
             </div>
             <div className="flex justify-between text-slate-400">
               <span>Focus Tag:</span>
               <span className="font-bold text-rose-400 capitalize">{weakTopic}</span>
             </div>
+            {userInfo.leetcodeHandle && (
+              <div className="pt-2 border-t border-slate-900/50 space-y-1.5">
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>LeetCode Account:</span>
+                  <span className="font-bold text-yellow-500">{userInfo.leetcodeHandle}</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-500">
+                  <span>Problems Solved:</span>
+                  <span>
+                    <span className="text-emerald-400">{(userInfo.leetcodeEasy ?? 0)}E</span> /{' '}
+                    <span className="text-yellow-400">{(userInfo.leetcodeMedium ?? 0)}M</span> /{' '}
+                    <span className="text-rose-400">{(userInfo.leetcodeHard ?? 0)}H</span>
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -132,7 +148,7 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
       <div className="lg:col-span-3 glass-card rounded-2xl flex flex-col h-[520px] overflow-hidden">
         {/* Chat header */}
         <div className="glass-panel px-6 py-4 flex items-center gap-3 border-b border-slate-900">
-          <div className="w-10 h-10 rounded-full bg-violet-600/20 text-violet-400 flex items-center justify-center border border-violet-500/20">
+          <div className="w-10 h-10 rounded-full bg-cyan-600/20 text-cyan-400 flex items-center justify-center border border-cyan-500/20">
             <Bot size={22} />
           </div>
           <div>
@@ -153,14 +169,14 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
             >
               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
                 msg.sender === 'user' 
-                  ? 'bg-violet-600 text-white' 
-                  : 'bg-slate-900 border border-slate-800 text-violet-400'
+                  ? 'bg-cyan-600 text-slate-950' 
+                  : 'bg-slate-900 border border-slate-800 text-cyan-400'
               }`}>
                 {msg.sender === 'user' ? <User size={14} /> : <Bot size={14} />}
               </div>
               <div className={`p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-line ${
                 msg.sender === 'user' 
-                  ? 'bg-violet-600 text-white rounded-tr-none' 
+                  ? 'bg-cyan-600 text-slate-950 rounded-tr-none' 
                   : 'bg-slate-900/60 border border-slate-800/80 text-slate-200 rounded-tl-none markdown-style'
               }`}>
                 {msg.text}
@@ -170,7 +186,7 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
           
           {isTyping && (
             <div className="flex items-start gap-3 max-w-[85%]">
-              <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-800 text-violet-400 flex items-center justify-center text-xs">
+              <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-800 text-cyan-400 flex items-center justify-center text-xs">
                 <Bot size={14} />
               </div>
               <div className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl rounded-tl-none text-slate-400 text-sm flex gap-1 items-center">
@@ -186,21 +202,21 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
         <div className="px-6 py-2 flex flex-wrap gap-2 border-t border-slate-900/40 bg-slate-950/20">
           <button 
             onClick={() => handleSendMessage('Review my recent performance')}
-            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-violet-500/20 transition-all flex items-center gap-1"
+            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-cyan-500/20 transition-all flex items-center gap-1"
           >
-            <Award size={12} className="text-violet-400" />
+            <Award size={12} className="text-cyan-400" />
             Review performance
           </button>
           <button 
             onClick={() => handleSendMessage('Generate a 4-week practice schedule')}
-            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-violet-500/20 transition-all flex items-center gap-1"
+            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-cyan-500/20 transition-all flex items-center gap-1"
           >
             <BookOpen size={12} className="text-emerald-400" />
             Get practice plan
           </button>
           <button 
             onClick={() => handleSendMessage(`Suggest how to cross ${currentRating + 200} rating`)}
-            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-violet-500/20 transition-all flex items-center gap-1"
+            className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-full border border-slate-800 hover:border-cyan-500/20 transition-all flex items-center gap-1"
           >
             <Flame size={12} className="text-rose-400" />
             How to increase rating
@@ -222,7 +238,7 @@ export const AICoach: React.FC<AICoachProps> = ({ userInfo, ratingHistory: _rati
           />
           <button 
             type="submit" 
-            className="bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white font-bold p-2.5 rounded-xl transition-all"
+            className="bg-[#06b6d4] hover:bg-cyan-400 disabled:bg-cyan-800 text-slate-950 font-bold p-2.5 rounded-xl transition-all"
             disabled={isTyping || !inputText.trim()}
           >
             <Send size={18} />
