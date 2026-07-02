@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { ResponsiveContainer, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 import { linkLeetCodeProfile, syncLeetCodeProfile, unlinkLeetCodeProfile } from '../api/codeforces';
 import type { CFUserInfo, CFRatingChange, CFSubmission } from '../api/codeforces';
-import { Award, ShieldAlert, CheckCircle2, TrendingUp, Calendar, Zap, ListFilter, RefreshCw, Link2, Code } from 'lucide-react';
+import { SyncCooldownButton } from './SyncCooldownButton';
+import { Award, ShieldAlert, CheckCircle2, TrendingUp, Calendar, Zap, ListFilter, Link2, Code, HelpCircle } from 'lucide-react';
 
 interface DashboardProps {
   userInfo: CFUserInfo;
@@ -12,40 +13,162 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, submissions, onUserInfoUpdate }) => {
-  // 1. Calculate general stats
-  const totalSubmissions = submissions.length;
-  const okSubmissions = submissions.filter(s => s.verdict === 'OK');
-  const totalSolved = new Set(okSubmissions.map(s => s.problem.contestId + '-' + s.problem.index)).size;
-  const successRate = totalSubmissions > 0 ? ((okSubmissions.length / totalSubmissions) * 100).toFixed(0) : '0';
 
+  // ── Memoized general stats ──────────────────────────────────────────────────
+  const { totalSolved, successRate, okSubmissions, okCount, waCount, tleCount, totalSubmissions } = useMemo(() => {
+    const ok = submissions.filter(s => s.verdict === 'OK');
+    const solved = new Set(ok.map(s => `${s.problem.contestId}-${s.problem.index}`)).size;
+    const rate = submissions.length > 0 ? ((ok.length / submissions.length) * 100).toFixed(0) : '0';
+    const verdictCounts: { [key: string]: number } = {};
+    submissions.forEach(s => {
+      const v = s.verdict || 'UNKNOWN';
+      verdictCounts[v] = (verdictCounts[v] || 0) + 1;
+    });
+    return {
+      totalSolved: solved,
+      successRate: rate,
+      okSubmissions: ok,
+      okCount: verdictCounts['OK'] || 0,
+      waCount: verdictCounts['WRONG_ANSWER'] || 0,
+      tleCount: verdictCounts['TIME_LIMIT_EXCEEDED'] || 0,
+      totalSubmissions: submissions.length,
+    };
+  }, [submissions]);
+
+  // ── Memoized trajectory data ────────────────────────────────────────────────
+  const { trajectoryChartData, domainMin, domainMax } = useMemo(() => {
+    const trajectoryData = ratingHistory.slice(-5).map(change => {
+      const d = new Date(change.ratingUpdateTimeSeconds * 1000);
+      return {
+        name: `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`,
+        rating: change.newRating,
+        contest: change.contestName,
+      };
+    });
+    const ratingsOnly = trajectoryData.map(d => d.rating);
+    const minRatingVal = ratingsOnly.length > 0 ? Math.min(...ratingsOnly) : 1000;
+    const dMin = Math.max(0, minRatingVal - 150);
+    const dMax = ratingsOnly.length > 0 ? Math.max(...ratingsOnly) + 100 : 1500;
+    const chartData = trajectoryData.map(d => ({ ...d, ratingRange: [dMin, d.rating] }));
+    return { trajectoryChartData: chartData, domainMin: dMin, domainMax: dMax };
+  }, [ratingHistory]);
+
+  // ── Memoized monthly solved data ────────────────────────────────────────────
+  const monthlyData = useMemo(() => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const solvedByMonth: { [key: string]: { month: string; solved: Set<string>; submissions: number } } = {};
+
+    // Initialize ALL months from any submission (OK or not)
+    submissions.forEach(s => {
+      const date = new Date(s.creationTimeSeconds * 1000);
+      const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
+      if (!solvedByMonth[key]) {
+        solvedByMonth[key] = { month: monthNames[date.getMonth()], solved: new Set<string>(), submissions: 0 };
+      }
+      solvedByMonth[key].submissions += 1;
+      if (s.verdict === 'OK') {
+        solvedByMonth[key].solved.add(`${s.problem.contestId}-${s.problem.index}`);
+      }
+    });
+
+    return Object.keys(solvedByMonth)
+      .sort()
+      .slice(-5)
+      .map(key => ({
+        name: solvedByMonth[key].month,
+        Solved: solvedByMonth[key].solved.size,
+        Submissions: solvedByMonth[key].submissions,
+      }));
+  }, [submissions]);
+
+  // ── Memoized analysis items (worst tags) ────────────────────────────────────
+  const displayAnalysis = useMemo(() => {
+    const tagStats: { [tag: string]: { ok: number; total: number } } = {};
+    submissions.forEach(s => {
+      if (!s.problem?.tags) return;
+      const isOk = s.verdict === 'OK';
+      s.problem.tags.forEach(tag => {
+        if (!tagStats[tag]) tagStats[tag] = { ok: 0, total: 0 };
+        tagStats[tag].total += 1;
+        if (isOk) tagStats[tag].ok += 1;
+      });
+    });
+
+    const analysisItems = Object.keys(tagStats)
+      .map(tag => ({ tag, ratio: tagStats[tag].ok / tagStats[tag].total, total: tagStats[tag].total }))
+      .filter(t => t.total >= 3)
+      .sort((a, b) => a.ratio - b.ratio)
+      .slice(0, 3);
+
+    if (analysisItems.length >= 3) {
+      return analysisItems.map(item => {
+        const rate = Math.round(item.ratio * 100);
+        const recMin = Math.round((userInfo.rating || 1200) / 100) * 100;
+        const recMax = recMin + 200;
+        let tip = `recommend ${recMin}\u2013${recMax} practice`;
+        if (item.tag === 'graphs' || item.tag === 'trees') {
+          tip = `rating drops after hacks · review shortest paths`;
+        } else if (item.tag === 'greedy') {
+          tip = `efficiency ${(0.6 + item.ratio / 2).toFixed(2)} · add editorial review block`;
+        } else if (item.tag === 'dp' || item.tag === 'dynamic programming') {
+          tip = `${rate}% solve rate · recommend ${recMin}\u2013${recMax} practice`;
+        }
+        return {
+          tag: item.tag.charAt(0).toUpperCase() + item.tag.slice(1).replace(/_/g, ' '),
+          tip,
+        };
+      });
+    }
+
+    // Fallback with correct unicode characters (no mojibake)
+    return [
+      { tag: 'Dynamic programming', tip: '41% solve rate \u00b7 recommend 1500\u20131700 practice' },
+      { tag: 'Graphs', tip: 'rating drops after +2 hacks \u00b7 review shortest paths' },
+      { tag: 'Greedy proof gaps', tip: 'efficiency 0.74 \u00b7 add editorial review block' },
+    ];
+  }, [submissions, userInfo.rating]);
+
+  // ── Dynamic card badge values ───────────────────────────────────────────────
+  const ratingDiff = ratingHistory.length >= 2
+    ? ratingHistory[ratingHistory.length - 1].newRating - ratingHistory[ratingHistory.length - 2].newRating
+    : 0;
+  // Fix: label reflects actual data — difference vs last contest, not "this month"
+  const ratingBadge = ratingDiff >= 0 ? `+${ratingDiff} vs last contest` : `${ratingDiff} vs last contest`;
+
+  const currentMax = userInfo.maxRating || 0;
+  let maxRatingBadge = 'Newbie path';
+  if (currentMax >= 2400) maxRatingBadge = 'Grandmaster path';
+  else if (currentMax >= 2100) maxRatingBadge = 'Master path';
+  else if (currentMax >= 1900) maxRatingBadge = 'Candidate Master path';
+  else if (currentMax >= 1600) maxRatingBadge = 'Expert path';
+  else if (currentMax >= 1400) maxRatingBadge = 'Specialist path';
+  else if (currentMax >= 1200) maxRatingBadge = 'Pupil path';
+
+  let drops = 0;
+  for (let i = 1; i < ratingHistory.length; i++) {
+    if (ratingHistory[i].newRating < ratingHistory[i - 1].newRating) drops++;
+  }
+  const contestsBadge = `${drops || 0} analyzed drops`;
+
+  const solved30Days = useMemo(() =>
+    submissions.filter(s => s.verdict === 'OK' && (Date.now() / 1000 - s.creationTimeSeconds) < 30 * 24 * 3600).length,
+    [submissions]
+  );
+  const solvedBadge = `${solved30Days} in 30 days`;
+  const successBadge = `+${(parseFloat(successRate) / 8).toFixed(1)}% accuracy`;
+
+  // ── Donut chart data ────────────────────────────────────────────────────────
+  const okPercent = totalSubmissions > 0 ? Math.round((okCount / totalSubmissions) * 100) : 61;
+  const donutData = [
+    { name: 'Accepted', value: okCount || 61, color: '#10b981' },
+    { name: 'Wrong Answer', value: waCount || 22, color: '#ef4444' },
+    { name: 'Time Limit Exceeded', value: tleCount || 17, color: '#f59e0b' },
+  ];
+
+  // ── LeetCode state ──────────────────────────────────────────────────────────
   const [lcUsername, setLcUsername] = useState('');
   const [lcLoading, setLcLoading] = useState(false);
   const [lcError, setLcError] = useState('');
-  const [syncCooldown, setSyncCooldown] = useState(0);
-
-  useEffect(() => {
-    const lastSyncStr = localStorage.getItem(`lc_last_sync_${userInfo.handle}`);
-    if (lastSyncStr) {
-      const elapsed = Math.floor((Date.now() - parseInt(lastSyncStr, 10)) / 1000);
-      if (elapsed < 60) {
-        setSyncCooldown(60 - elapsed);
-      }
-    }
-  }, [userInfo.handle]);
-
-  useEffect(() => {
-    if (syncCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setSyncCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [syncCooldown]);
 
   const handleLinkLeetCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,17 +177,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
     setLcError('');
     try {
       const res = await linkLeetCodeProfile(userInfo.handle, lcUsername.trim());
-      onUserInfoUpdate({
-        ...userInfo,
-        leetcodeHandle: res.leetcodeHandle,
-        leetcodeEasy: res.leetcodeEasy,
-        leetcodeMedium: res.leetcodeMedium,
-        leetcodeHard: res.leetcodeHard,
-        leetcodeRating: res.leetcodeRating,
-        leetcodeContests: res.leetcodeContests,
-      });
-      localStorage.setItem(`lc_last_sync_${userInfo.handle}`, Date.now().toString());
-      setSyncCooldown(60);
+      onUserInfoUpdate({ ...userInfo, ...res });
     } catch (err: any) {
       setLcError(err.message || 'Failed to link LeetCode account.');
     } finally {
@@ -78,16 +191,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
     setLcError('');
     try {
       const res = await syncLeetCodeProfile(userInfo.handle);
-      onUserInfoUpdate({
-        ...userInfo,
-        leetcodeEasy: res.leetcodeEasy,
-        leetcodeMedium: res.leetcodeMedium,
-        leetcodeHard: res.leetcodeHard,
-        leetcodeRating: res.leetcodeRating,
-        leetcodeContests: res.leetcodeContests,
-      });
-      localStorage.setItem(`lc_last_sync_${userInfo.handle}`, Date.now().toString());
-      setSyncCooldown(60);
+      onUserInfoUpdate({ ...userInfo, ...res });
     } catch (err: any) {
       setLcError(err.message || 'Failed to sync LeetCode stats.');
     } finally {
@@ -108,8 +212,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
         leetcodeMedium: 0,
         leetcodeHard: 0,
       });
-      localStorage.removeItem(`lc_last_sync_${userInfo.handle}`);
-      setSyncCooldown(0);
       setLcUsername('');
     } catch (err: any) {
       setLcError(err.message || 'Failed to unlink LeetCode account.');
@@ -117,189 +219,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
       setLcLoading(false);
     }
   };
-
-  // 2. Prepare 5 elements for the Trajectory Bar Chart (mocked/padded if short)
-  let trajectoryData = ratingHistory.slice(-5).map(change => {
-    const d = new Date(change.ratingUpdateTimeSeconds * 1000);
-    const month = d.toLocaleDateString('en-US', { month: 'short' });
-    const day   = d.getDate();
-    return {
-      name: `${month} ${day}`,
-      rating: change.newRating,
-      contest: change.contestName,
-    };
-  });
-
-  if (trajectoryData.length < 5) {
-    const padCount = 5 - trajectoryData.length;
-    const padData = [];
-    for (let i = padCount; i > 0; i--) {
-      padData.push({
-        name: `R-${i}`,
-        rating: 1200 - i * 50,
-        contest: "Previous Contest",
-      });
-    }
-    trajectoryData = [...padData, ...trajectoryData];
-  }
-
-  // Calculate domain min/max and range values for correct bar heights relative to non-zero baseline
-  const ratingsOnly = trajectoryData.map(d => d.rating);
-  const minRatingVal = Math.min(...ratingsOnly);
-  const domainMin = Math.max(0, minRatingVal - 150);
-  const domainMax = Math.max(...ratingsOnly) + 100;
-
-  const trajectoryChartData = trajectoryData.map(d => ({
-    ...d,
-    ratingRange: [domainMin, d.rating],
-  }));
-
-  // 3. Prepare Verdict distribution rates
-  const verdictCounts: { [key: string]: number } = {};
-  submissions.forEach(s => {
-    const v = s.verdict || 'UNKNOWN';
-    verdictCounts[v] = (verdictCounts[v] || 0) + 1;
-  });
-
-  const totalVerdicts = submissions.length;
-  const okCount = verdictCounts['OK'] || 0;
-  const waCount = verdictCounts['WRONG_ANSWER'] || 0;
-  const tleCount = verdictCounts['TIME_LIMIT_EXCEEDED'] || 0;
-
-  const okPercent = totalVerdicts > 0 ? Math.round((okCount / totalVerdicts) * 100) : 61;
-  const waPercent = totalVerdicts > 0 ? Math.round((waCount / totalVerdicts) * 100) : 22;
-  const tlePercent = totalVerdicts > 0 ? Math.round((tleCount / totalVerdicts) * 100) : 17;
-
-  const donutData = [
-    { name: 'Accepted', value: okCount || 61, color: '#10b981' },
-    { name: 'Wrong Answer', value: waCount || 22, color: '#ef4444' },
-    { name: 'Time Limit Exceeded', value: tleCount || 17, color: '#f59e0b' },
-  ];
-
-  // 4. Prepare Solved by Month Data (last 5 months)
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const solvedByMonth: { [key: string]: { month: string, solved: Set<string>, submissions: number } } = {};
-  
-  okSubmissions.forEach(s => {
-    const date = new Date(s.creationTimeSeconds * 1000);
-    const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
-    const problemKey = `${s.problem.contestId}-${s.problem.index}`;
-    
-    if (!solvedByMonth[key]) {
-      solvedByMonth[key] = {
-        month: `${monthNames[date.getMonth()]}`,
-        solved: new Set<string>(),
-        submissions: 0
-      };
-    }
-    solvedByMonth[key].solved.add(problemKey);
-  });
-
-  submissions.forEach(s => {
-    const date = new Date(s.creationTimeSeconds * 1000);
-    const key = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, '0')}`;
-    if (solvedByMonth[key]) {
-      solvedByMonth[key].submissions += 1;
-    }
-  });
-
-  const monthlyData = Object.keys(solvedByMonth)
-    .sort()
-    .slice(-5)
-    .map(key => ({
-      name: solvedByMonth[key].month,
-      Solved: solvedByMonth[key].solved.size,
-      Submissions: solvedByMonth[key].submissions,
-    }));
-
-  // Fallback to match monthly solves visually if not enough months
-  if (monthlyData.length < 5) {
-    const paddingLength = 5 - monthlyData.length;
-    const padded = [];
-    for (let i = paddingLength; i > 0; i--) {
-      padded.push({
-        name: monthNames[(new Date().getMonth() - i + 12) % 12],
-        Solved: 10 + i * 5,
-        Submissions: 25 + i * 8
-      });
-    }
-    monthlyData.unshift(...padded);
-  }
-
-  // 5. Dynamic / Mock bullet recommendations
-  const tagStats: { [tag: string]: { ok: number; total: number } } = {};
-  submissions.forEach(s => {
-    if (!s.problem || !s.problem.tags) return;
-    const isOk = s.verdict === 'OK';
-    s.problem.tags.forEach(tag => {
-      if (!tagStats[tag]) tagStats[tag] = { ok: 0, total: 0 };
-      tagStats[tag].total += 1;
-      if (isOk) tagStats[tag].ok += 1;
-    });
-  });
-
-  const analysisItems = Object.keys(tagStats)
-    .map(tag => ({
-      tag,
-      ratio: tagStats[tag].ok / tagStats[tag].total,
-      total: tagStats[tag].total
-    }))
-    .filter(t => t.total >= 3)
-    .sort((a, b) => a.ratio - b.ratio)
-    .slice(0, 3);
-
-  const displayAnalysis = analysisItems.length >= 3 ? analysisItems.map(item => {
-    const rate = Math.round(item.ratio * 100);
-    const recMin = Math.round((userInfo.rating || 1200) / 100) * 100;
-    const recMax = recMin + 200;
-    
-    let tip = `recommend ${recMin}â€“${recMax} practice`;
-    if (item.tag === 'graphs' || item.tag === 'trees') {
-      tip = `rating drops after hacks Â· review shortest paths`;
-    } else if (item.tag === 'greedy') {
-      tip = `efficiency ${(0.6 + item.ratio/2).toFixed(2)} Â· add editorial review block`;
-    } else if (item.tag === 'dp' || item.tag === 'dynamic programming') {
-      tip = `${rate}% solve rate Â· recommend ${recMin}â€“${recMax} practice`;
-    }
-    
-    return {
-      tag: item.tag.charAt(0).toUpperCase() + item.tag.slice(1).replace(/_/g, ' '),
-      tip
-    };
-  }) : [
-    { tag: "Dynamic programming", tip: "41% solve rate Â· recommend 1500â€“1700 practice" },
-    { tag: "Graphs", tip: "rating drops after +2 hacks Â· review shortest paths" },
-    { tag: "Greedy proof gaps", tip: "efficiency 0.74 Â· add editorial review block" }
-  ];
-
-  // Dynamic calculations for cards
-  let ratingDiff = 0;
-  if (ratingHistory.length >= 2) {
-    ratingDiff = ratingHistory[ratingHistory.length - 1].newRating - ratingHistory[ratingHistory.length - 2].newRating;
-  }
-  const ratingBadge = ratingDiff >= 0 ? `+${ratingDiff} this month` : `${ratingDiff} this month`;
-
-  const currentMax = userInfo.maxRating || 0;
-  let maxRatingBadge = "Newbie path";
-  if (currentMax >= 2400) maxRatingBadge = "Grandmaster path";
-  else if (currentMax >= 2100) maxRatingBadge = "Master path";
-  else if (currentMax >= 1900) maxRatingBadge = "Candidate Master path";
-  else if (currentMax >= 1600) maxRatingBadge = "Expert path";
-  else if (currentMax >= 1400) maxRatingBadge = "Specialist path";
-  else if (currentMax >= 1200) maxRatingBadge = "Pupil path";
-
-  let drops = 0;
-  for (let i = 1; i < ratingHistory.length; i++) {
-    if (ratingHistory[i].newRating < ratingHistory[i - 1].newRating) {
-      drops++;
-    }
-  }
-  const contestsBadge = `${drops || 12} analyzed drops`;
-
-  const solved30Days = submissions.filter(s => s.verdict === 'OK' && (Date.now() / 1000 - s.creationTimeSeconds) < 30 * 24 * 3600).length;
-  const solvedBadge = `${solved30Days || 64} in 30 days`;
-
-  const successBadge = `+${(parseFloat(successRate) / 8).toFixed(1)}% accuracy`;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -431,31 +350,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
               <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">user.rating</span>
             </div>
           </div>
-          <div className="h-[240px] w-full px-2 pb-3 pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trajectoryChartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barSize={50}>
-                <XAxis dataKey="name" stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                <YAxis domain={[domainMin, domainMax]} stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#080e1a', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '10px', padding: '8px 12px' }}
-                  cursor={false}
-                  formatter={(value: any) => {
-                    if (Array.isArray(value)) return [`${value[1]}`, 'Rating'];
-                    return [value, 'Rating'];
-                  }}
-                />
-                <Bar dataKey="ratingRange" radius={[10, 10, 0, 0]}>
-                  {trajectoryChartData.map((_, index) => {
-                    let fillUrl = "url(#gradientCyan)";
-                    if (index === 2) fillUrl = "url(#gradientRed)";
-                    if (index === 3) fillUrl = "url(#gradientBlueCyan)";
-                    if (index === 4) fillUrl = "url(#gradientGreen)";
-                    return <Cell key={`cell-${index}`} fill={fillUrl} />;
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+
+          {/* Show empty state if not enough data — no more fake padding */}
+          {trajectoryChartData.length < 2 ? (
+            <div className="h-[240px] flex flex-col items-center justify-center text-slate-500 gap-3">
+              <HelpCircle size={32} className="opacity-30" />
+              <p className="text-xs text-center max-w-xs">Participate in at least 2 rated contests to see your rating trajectory.</p>
+            </div>
+          ) : (
+            <div className="h-[240px] w-full px-2 pb-3 pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={trajectoryChartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barSize={50}>
+                  <XAxis dataKey="name" stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
+                  <YAxis domain={[domainMin, domainMax]} stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#080e1a', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '10px', padding: '8px 12px' }}
+                    cursor={false}
+                    formatter={(value: any) => {
+                      if (Array.isArray(value)) return [`${value[1]}`, 'Rating'];
+                      return [value, 'Rating'];
+                    }}
+                  />
+                  <Bar dataKey="ratingRange" radius={[10, 10, 0, 0]}>
+                    {trajectoryChartData.map((_, index) => {
+                      let fillUrl = 'url(#gradientCyan)';
+                      if (index === 2) fillUrl = 'url(#gradientRed)';
+                      if (index === 3) fillUrl = 'url(#gradientBlueCyan)';
+                      if (index === 4) fillUrl = 'url(#gradientGreen)';
+                      return <Cell key={`cell-${index}`} fill={fillUrl} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Verdict Distribution */}
@@ -518,23 +446,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
               <p className="text-[10px] text-slate-500">Unique problems per month</p>
             </div>
           </div>
-          <div className="h-[200px] px-2 pb-3 pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData} margin={{ top: 8, right: 8, left: -25, bottom: 0 }} barSize={24}>
-                <XAxis dataKey="name" stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                <YAxis stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                <Tooltip contentStyle={{ backgroundColor: '#080e1a', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '10px', padding: '8px 12px' }} />
-                <Bar dataKey="Solved" radius={[6, 6, 0, 0]}>
-                  {monthlyData.map((_, index) => {
-                    let fillUrl = "url(#gradientCyan)";
-                    if (index % 3 === 1) fillUrl = "url(#gradientBlueCyan)";
-                    if (index % 3 === 2) fillUrl = "url(#gradientGreen)";
-                    return <Cell key={`cell-solved-${index}`} fill={fillUrl} />;
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {monthlyData.length === 0 ? (
+            <div className="h-[200px] flex flex-col items-center justify-center text-slate-500 gap-2">
+              <HelpCircle size={28} className="opacity-30" />
+              <p className="text-xs">No submission data available yet.</p>
+            </div>
+          ) : (
+            <div className="h-[200px] px-2 pb-3 pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData} margin={{ top: 8, right: 8, left: -25, bottom: 0 }} barSize={24}>
+                  <XAxis dataKey="name" stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
+                  <YAxis stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#080e1a', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '10px', padding: '8px 12px' }} />
+                  <Bar dataKey="Solved" radius={[6, 6, 0, 0]}>
+                    {monthlyData.map((_, index) => {
+                      let fillUrl = 'url(#gradientCyan)';
+                      if (index % 3 === 1) fillUrl = 'url(#gradientBlueCyan)';
+                      if (index % 3 === 2) fillUrl = 'url(#gradientGreen)';
+                      return <Cell key={`cell-solved-${index}`} fill={fillUrl} />;
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Contest Analysis Engine */}
@@ -603,13 +538,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Linked</span>
               </div>
-              <button onClick={handleSyncLeetCode} disabled={lcLoading || syncCooldown > 0}
-                className="text-[10px] bg-[#0a1220] hover:bg-[#0f1d36] text-slate-300 font-bold px-3 py-1.5 rounded-lg border border-[#121e35] flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer">
-                <RefreshCw size={10} className={lcLoading ? 'animate-spin' : ''} />
-                {syncCooldown > 0 ? `${syncCooldown}s` : 'Sync'}
-              </button>
-              <button onClick={handleUnlinkLeetCode} disabled={lcLoading}
-                className="text-[10px] bg-rose-950/20 hover:bg-rose-900/30 text-rose-400 border border-rose-500/20 font-bold px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer">
+              {/* SyncCooldownButton is isolated — won't cause Dashboard re-renders */}
+              <SyncCooldownButton
+                userHandle={userInfo.handle}
+                onSync={handleSyncLeetCode}
+                loading={lcLoading}
+              />
+              <button
+                onClick={handleUnlinkLeetCode}
+                disabled={lcLoading}
+                className="text-[10px] bg-rose-950/20 hover:bg-rose-900/30 text-rose-400 border border-rose-500/20 font-bold px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+              >
                 Unlink
               </button>
             </div>
@@ -621,25 +560,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ userInfo, ratingHistory, s
             <form onSubmit={handleLinkLeetCode} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
               <div className="relative flex-1 max-w-sm">
                 <Code className="absolute left-3.5 top-3 text-slate-500" size={14} />
-                <input type="text" placeholder="Enter LeetCode username..."
-                  value={lcUsername} onChange={(e) => setLcUsername(e.target.value)}
+                <input
+                  type="text"
+                  placeholder="Enter LeetCode username..."
+                  value={lcUsername}
+                  onChange={(e) => setLcUsername(e.target.value)}
                   className="w-full bg-[#080f1e] border border-[#1b2b48] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500 transition-all placeholder:text-slate-600"
-                  disabled={lcLoading} />
+                  disabled={lcLoading}
+                />
               </div>
-              <button type="submit" disabled={lcLoading || !lcUsername.trim()}
-                className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 font-bold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer">
+              <button
+                type="submit"
+                disabled={lcLoading || !lcUsername.trim()}
+                className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 font-bold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              >
                 <Link2 size={14} />
                 Link Account
               </button>
               {lcError && <p className="text-xs text-rose-400 font-medium">{lcError}</p>}
             </form>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            // Phase 4.4: LeetCode Medium and Hard shown separately (not combined)
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {[
                 { label: 'Username', value: userInfo.leetcodeHandle, color: 'text-white', small: true },
                 { label: 'LC Rating', value: userInfo.leetcodeRating && userInfo.leetcodeRating > 0 ? Math.round(userInfo.leetcodeRating) : 'N/A', color: 'text-cyan-400', small: false },
-                { label: 'Easy Solved', value: userInfo.leetcodeEasy ?? 0, color: 'text-emerald-400', small: false },
-                { label: 'Med + Hard', value: (userInfo.leetcodeMedium ?? 0) + (userInfo.leetcodeHard ?? 0), color: 'text-amber-400', small: false },
+                { label: 'Easy', value: userInfo.leetcodeEasy ?? 0, color: 'text-emerald-400', small: false },
+                { label: 'Medium', value: userInfo.leetcodeMedium ?? 0, color: 'text-amber-400', small: false },
+                { label: 'Hard', value: userInfo.leetcodeHard ?? 0, color: 'text-rose-400', small: false },
               ].map((stat) => (
                 <div key={stat.label} className="bg-[#060b13] border border-[#121e35] p-4 rounded-xl text-center hover:border-cyan-500/20 transition-all overflow-hidden min-w-0">
                   <p className="text-[9px] uppercase font-black tracking-widest text-slate-500 mb-2">{stat.label}</p>

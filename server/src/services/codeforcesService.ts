@@ -148,7 +148,7 @@ export const getMockData = (handle: string) => {
   return { userInfo, ratingHistory, submissions };
 };
 
-export const getCodeforcesData = async (handle: string) => {
+export const getCodeforcesData = async (handle: string, submissionCount: number = 300) => {
   const normHandle = handle.trim().toLowerCase();
   
   // 1. Check if "demo" handle is requested
@@ -238,7 +238,7 @@ export const getCodeforcesData = async (handle: string) => {
   try {
     const infoUrl = `https://codeforces.com/api/user.info?handles=${handle}`;
     const ratingUrl = `https://codeforces.com/api/user.rating?handle=${handle}`;
-    const statusUrl = `https://codeforces.com/api/user.status?handle=${handle}&from=1&count=1000`;
+    const statusUrl = `https://codeforces.com/api/user.status?handle=${handle}&from=1&count=${submissionCount}`;
 
     const [infoRes, ratingRes, statusRes] = await Promise.all([
       axios.get(infoUrl, { timeout: 8000 }).then(r => r.data),

@@ -7,10 +7,20 @@ import { Predictions } from './components/Predictions';
 import { Coach } from './components/Coach';
 import { Social } from './components/Social';
 import { AICoach } from './components/AICoach';
-import { Search, Flame, Terminal, HelpCircle, AlertCircle, RefreshCw, BarChart2, ShieldAlert, Award, Compass, Zap, Trophy } from 'lucide-react';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { TabSkeleton } from './components/TabSkeleton';
+import { Search, Flame, HelpCircle, AlertCircle, RefreshCw, BarChart2, ShieldAlert, Award, Compass, Zap, Trophy, Menu, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 type TabType = 'dashboard' | 'analysis' | 'predictions' | 'coach' | 'social' | 'aicoach';
+
+// AI chat message type (shared with AICoach component)
+export interface ChatMessage {
+  id: string;
+  sender: 'ai' | 'user';
+  text: string;
+  timestamp: Date;
+}
 
 function App() {
   const [handle, setHandle] = useState(() => localStorage.getItem('cf_handle') || '');
@@ -18,33 +28,39 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
-  
-  // Codeforces profiles data
+  const [tabLoading, setTabLoading] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Codeforces profile data
   const [userInfo, setUserInfo] = useState<CFUserInfo | null>(null);
   const [ratingHistory, setRatingHistory] = useState<CFRatingChange[]>([]);
   const [submissions, setSubmissions] = useState<CFSubmission[]>([]);
   const [isSimulated, setIsSimulated] = useState(false);
+
+  // AI chat state lifted here so it persists across tab switches
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   const loadData = async (targetHandle: string) => {
     if (!targetHandle.trim()) return;
     setLoading(true);
     setError('');
     setIsSimulated(false);
-    
+
     try {
       const data = await fetchCodeforcesData(targetHandle);
-      
-      // Determine if mock data was returned
-      // (Mock profiles have avatar links from dicebear)
-      const mockUsed = data.userInfo.avatar?.includes('dicebear.com') || targetHandle.toLowerCase() === 'demo';
-      setIsSimulated(mockUsed);
+
+      // Use the reliable isMockFallback flag from the API layer
+      setIsSimulated(data.isMockFallback);
 
       setUserInfo(data.userInfo);
       setRatingHistory(data.ratingHistory);
       setSubmissions(data.submissions);
-      
+
       localStorage.setItem('cf_handle', targetHandle);
       setHandle(targetHandle);
+
+      // Reset chat when a new profile is loaded
+      setChatMessages([]);
 
       // Trigger premium celebration confetti!
       confetti({
@@ -87,6 +103,15 @@ function App() {
     setSubmissions([]);
     setSearchInput('');
     setIsSimulated(false);
+    setChatMessages([]);
+  };
+
+  const handleTabChange = (tab: TabType) => {
+    if (tab === activeTab) return;
+    setTabLoading(true);
+    setActiveTab(tab);
+    // Brief skeleton flash for perceived snappiness
+    setTimeout(() => setTabLoading(false), 120);
   };
 
   const navigationTabs = [
@@ -99,8 +124,8 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#030712] text-slate-100 font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
-      
+    <div className="min-h-screen flex flex-col bg-[#030712] text-slate-100 font-sans selection:bg-cyan-500/30 selection:text-cyan-200" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}>
+
       {/* State: A. Loading Overlay */}
       {loading && (
         <div className="flex-1 flex flex-col items-center justify-center py-24 space-y-6">
@@ -222,12 +247,130 @@ function App() {
         </>
       )}
 
-      {/* State: C. Logged In Application Frame (Sidebar Layout) */}
+      {/* State: C. Logged In Application Frame (Responsive Sidebar / Drawer Layout) */}
       {!loading && userInfo && (
-        <div className="flex flex-col md:flex-row flex-1 min-h-screen">
-          
-          {/* Left Sidebar */}
-          <aside className="w-full md:w-64 bg-[#060b13] border-r border-[#121e35] flex flex-col p-5 space-y-5 animate-slide-in-left">
+        <div className="flex flex-col md:flex-row flex-1 min-h-screen relative">
+
+          {/* 1. Mobile Top Header (only visible on mobile/tablet) */}
+          <header className="flex md:hidden sticky top-0 z-45 w-full bg-[#060b13]/90 border-b border-[#121e35] h-14 items-center justify-between px-4 backdrop-blur-md">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-900 transition-colors"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center">
+                <Trophy size={14} className="text-white" />
+              </div>
+              <span className="font-extrabold text-white text-sm tracking-tight">Contest Coach</span>
+            </div>
+            {userInfo.avatar ? (
+              <img
+                src={userInfo.avatar}
+                alt={userInfo.handle}
+                className="w-7 h-7 rounded-full border border-cyan-500/30 object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-slate-800" />
+            )}
+          </header>
+
+          {/* 2. Mobile Drawer Menu Overlay */}
+          {mobileMenuOpen && (
+            <div className="fixed inset-0 z-50 md:hidden flex">
+              {/* Backdrop */}
+              <div
+                onClick={() => setMobileMenuOpen(false)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+              />
+              {/* Drawer Container */}
+              <div className="relative w-72 bg-[#060b13] border-r border-[#121e35] h-full flex flex-col p-5 space-y-5 animate-slide-in-left shadow-2xl">
+                {/* Close Button */}
+                <button
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-900 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+
+                {/* Logo */}
+                <div className="flex items-center gap-3 pb-1">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center">
+                    <Trophy size={18} className="text-white" />
+                  </div>
+                  <div>
+                    <span className="font-extrabold text-white text-sm tracking-tight block">Contest Coach</span>
+                    <span className="text-[10px] text-cyan-400/70 block tracking-wider font-semibold">Codeforces intelligence</span>
+                  </div>
+                </div>
+
+                {/* Navigation Menu */}
+                <nav className="flex-1 space-y-0.5">
+                  {navigationTabs.map((tab, idx) => {
+                    const Icon = tab.icon;
+                    const isActive = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => {
+                          handleTabChange(tab.id as TabType);
+                          setMobileMenuOpen(false);
+                        }}
+                        style={{ animationDelay: `${idx * 0.03}s` }}
+                        className={`w-full flex items-center gap-3 py-2.5 px-3.5 text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer group relative ${
+                          isActive
+                            ? 'bg-[#0f1d36] text-cyan-400 shadow-[inset_3px_0_0_#06b6d4]'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-[#0a1220]'
+                        }`}
+                      >
+                        <Icon size={17} className={`transition-all duration-200 ${ isActive ? 'text-cyan-400' : 'group-hover:text-slate-300' }`} />
+                        {tab.label}
+                        {isActive && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                {/* Status Box */}
+                <div className="border border-emerald-900/40 bg-emerald-950/20 p-3.5 rounded-xl">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="text-[10px] uppercase font-black tracking-wider text-slate-500">Sync status</span>
+                  </div>
+                  <span className="text-xs text-emerald-400 font-medium block">
+                    PostgreSQL Ingested
+                  </span>
+                </div>
+
+                {/* User Detail & Logout */}
+                <div className="border-t border-[#121e35] pt-4 flex items-center gap-3">
+                  {userInfo.avatar && (
+                    <img
+                      src={userInfo.avatar}
+                      alt={userInfo.handle}
+                      className="w-8 h-8 rounded-full border-2 border-cyan-500/30 bg-slate-900 object-cover"
+                    />
+                  )}
+                  <div className="truncate flex-1">
+                    <span className="text-[9px] text-slate-500 block">Logged in as</span>
+                    <span className="text-xs font-bold text-cyan-400 block truncate">{userInfo.handle}</span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-2.5 py-1.5 rounded-lg transition-all"
+                  >
+                    Exit
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. Left Sidebar (desktop only, hidden on mobile/tablet) */}
+          <aside className="hidden md:flex md:w-64 bg-[#060b13] border-r border-[#121e35] flex-col p-5 space-y-5 animate-slide-in-left">
 
             {/* Logo */}
             <div className="flex items-center gap-3 pb-1">
@@ -251,7 +394,7 @@ function App() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id as TabType)}
+                    onClick={() => handleTabChange(tab.id as TabType)}
                     style={{ animationDelay: `${idx * 0.05}s` }}
                     className={`w-full flex items-center gap-3 py-2.5 px-3.5 text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer animate-slide-in-left group relative overflow-hidden ${
                       isActive
@@ -327,12 +470,11 @@ function App() {
               </button>
             </div>
 
-
           </aside>
 
           {/* Right Main Content */}
-          <main className="flex-1 bg-[#030712] p-6 lg:p-8 overflow-y-auto flex flex-col space-y-6">
-            
+          <main className="flex-1 bg-[#030712] p-4 sm:p-6 lg:p-8 overflow-y-auto flex flex-col space-y-6">
+
             {/* Warning: Simulated data fallback */}
             {isSimulated && (
               <div className="flex items-center justify-between bg-cyan-950/15 border border-cyan-500/20 text-cyan-200 px-4 py-3 rounded-xl text-xs">
@@ -379,67 +521,76 @@ function App() {
 
             {/* Tab Panel Render */}
             <div className="flex-1 min-h-[400px]">
-              {activeTab === 'dashboard' && (
-                <div key="dashboard" className="animate-fade-in-up">
-                  <Dashboard
-                    userInfo={userInfo}
-                    ratingHistory={ratingHistory}
-                    submissions={submissions}
-                    onUserInfoUpdate={setUserInfo}
-                  />
-                </div>
-              )}
-              {activeTab === 'analysis' && (
-                <div key="analysis" className="animate-fade-in-up">
-                  <Analysis
-                    userInfo={userInfo}
-                    ratingHistory={ratingHistory}
-                    submissions={submissions}
-                  />
-                </div>
-              )}
-              {activeTab === 'predictions' && (
-                <div key="predictions" className="animate-fade-in-up">
-                  <Predictions
-                    userInfo={userInfo}
-                    ratingHistory={ratingHistory}
-                  />
-                </div>
-              )}
-              {activeTab === 'coach' && (
-                <div key="coach" className="animate-fade-in-up">
-                  <Coach
-                    userInfo={userInfo}
-                    submissions={submissions}
-                  />
-                </div>
-              )}
-              {activeTab === 'social' && (
-                <div key="social" className="animate-fade-in-up">
-                  <Social
-                    primaryUser={userInfo}
-                    primaryRatingHistory={ratingHistory}
-                    primarySubmissions={submissions}
-                  />
-                </div>
-              )}
-              {activeTab === 'aicoach' && (
-                <div key="aicoach" className="animate-fade-in-up">
-                  <AICoach
-                    userInfo={userInfo}
-                    ratingHistory={ratingHistory}
-                    submissions={submissions}
-                  />
-                </div>
+              {tabLoading ? (
+                <TabSkeleton />
+              ) : (
+                <ErrorBoundary key={activeTab}>
+                  {activeTab === 'dashboard' && (
+                    <div className="animate-fade-in-up">
+                      <Dashboard
+                        userInfo={userInfo}
+                        ratingHistory={ratingHistory}
+                        submissions={submissions}
+                        onUserInfoUpdate={setUserInfo}
+                      />
+                    </div>
+                  )}
+                  {activeTab === 'analysis' && (
+                    <div className="animate-fade-in-up">
+                      <Analysis
+                        userInfo={userInfo}
+                        ratingHistory={ratingHistory}
+                        submissions={submissions}
+                      />
+                    </div>
+                  )}
+                  {activeTab === 'predictions' && (
+                    <div className="animate-fade-in-up">
+                      <Predictions
+                        userInfo={userInfo}
+                        ratingHistory={ratingHistory}
+                      />
+                    </div>
+                  )}
+                  {activeTab === 'coach' && (
+                    <div className="animate-fade-in-up">
+                      <Coach
+                        userInfo={userInfo}
+                        submissions={submissions}
+                        onNavigate={(tab) => handleTabChange(tab as TabType)}
+                      />
+                    </div>
+                  )}
+                  {activeTab === 'social' && (
+                    <div className="animate-fade-in-up">
+                      <Social
+                        primaryUser={userInfo}
+                        primaryRatingHistory={ratingHistory}
+                        primarySubmissions={submissions}
+                      />
+                    </div>
+                  )}
+                  {activeTab === 'aicoach' && (
+                    <div className="animate-fade-in-up">
+                      <AICoach
+                        userInfo={userInfo}
+                        ratingHistory={ratingHistory}
+                        submissions={submissions}
+                        chatMessages={chatMessages}
+                        onMessagesChange={setChatMessages}
+                      />
+                    </div>
+                  )}
+                </ErrorBoundary>
               )}
             </div>
 
           </main>
-          
+
         </div>
       )}
 
-      {/* Footer (only on onboarding page or centered format) */}
+      {/* Footer (only on onboarding page) */}
       {!userInfo && (
         <footer className="mt-12 border-t border-slate-900/60 py-6 text-center text-xs text-slate-500 max-w-7xl mx-auto w-full px-4">
           <p>© 2026 Contest Coach Frontend Dashboard. Powered by public Codeforces REST endpoints.</p>
@@ -450,4 +601,3 @@ function App() {
 }
 
 export default App;
-

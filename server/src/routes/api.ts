@@ -6,20 +6,31 @@ import { fetchLeetCodeStats } from '../services/leetcodeService';
 
 const router = Router();
 
+const CF_HANDLE_REGEX = /^[a-zA-Z0-9_\-.]{1,50}$/;
+const validateHandle = (h: string): boolean => CF_HANDLE_REGEX.test(h);
+
+// Central middleware: validates and sanitizes any route with a ':handle' param
+router.param('handle', (req: Request, res: Response, next, handle) => {
+  if (typeof handle !== 'string' || !validateHandle(handle)) {
+    res.status(400).json({
+      status: 'FAILED',
+      comment: 'Invalid handle format. Use 1-50 alphanumeric characters, underscores, hyphens, or dots.'
+    });
+    return;
+  }
+  next();
+});
+
 router.get('/user/:handle', async (req: Request, res: Response): Promise<void> => {
   const { handle } = req.params;
 
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter is required and must be a string' });
-    return;
-  }
+  // Optional submission count cap — default 300, max 1000
+  const rawCount = parseInt(req.query.count as string);
+  const submissionCount = !isNaN(rawCount) ? Math.min(Math.max(rawCount, 1), 1000) : 300;
 
   try {
-    const data = await getCodeforcesData(handle);
-    res.json({
-      status: 'OK',
-      result: data
-    });
+    const data = await getCodeforcesData(handle as string, submissionCount);
+    res.json({ status: 'OK', result: data });
   } catch (error: any) {
     res.status(500).json({
       status: 'FAILED',
@@ -217,8 +228,8 @@ router.post('/user/:handle/leetcode/link', async (req: Request, res: Response): 
     return;
   }
 
-  if (!leetcodeHandle || typeof leetcodeHandle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'leetcodeHandle is required and must be a string' });
+  if (!leetcodeHandle || typeof leetcodeHandle !== 'string' || !validateHandle(leetcodeHandle)) {
+    res.status(400).json({ status: 'FAILED', comment: 'leetcodeHandle is required and must be a valid handle format.' });
     return;
   }
 

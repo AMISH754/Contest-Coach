@@ -1,27 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { regenerateTasks } from '../api/codeforces';
-import type { CFUserInfo, CFSubmission } from '../api/codeforces';
-import { Calendar, Dumbbell, ChevronRight, Zap } from 'lucide-react';
+import { fetchCoachTasks, toggleCoachTask, regenerateTasks } from '../api/codeforces';
+import type { CFUserInfo, CFSubmission, CoachTask } from '../api/codeforces';
+import { Calendar, Dumbbell, ChevronRight, Zap, RefreshCw, Flame, CheckCircle2, Circle, Target, BookOpen, Code2 } from 'lucide-react';
 
 interface CoachProps {
   userInfo: CFUserInfo;
   submissions: CFSubmission[];
+  onNavigate: (tab: string) => void;
 }
 
-interface TaskItem {
-  id: string;
-  title: string;
-  category: string;
-  difficulty: number;
-  completed: boolean;
-  desc: string;
-}
-
-export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
+export const Coach: React.FC<CoachProps> = ({ userInfo, submissions, onNavigate }) => {
   const currentRating = userInfo.rating || 1200;
 
-  // 1. Calculate Daily streak
-  // Create last 28 days list
+  // ── Heatmap / Streak ───────────────────────────────────────────────────────
   const streakDays = Array.from({ length: 28 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (27 - i));
@@ -31,18 +22,26 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
 
   const submissionsByDay: { [time: number]: number } = {};
   submissions.forEach(s => {
-    const sDate = new Date(s.creationTimeSeconds * 1000);
-    sDate.setHours(0, 0, 0, 0);
-    const timeVal = sDate.getTime();
-    submissionsByDay[timeVal] = (submissionsByDay[timeVal] || 0) + 1;
+    const d = new Date(s.creationTimeSeconds * 1000);
+    d.setHours(0, 0, 0, 0);
+    const t = d.getTime();
+    submissionsByDay[t] = (submissionsByDay[t] || 0) + 1;
   });
 
   // Calculate current active streak
+  // If today has no submissions yet, start from yesterday (same as GitHub's streak logic)
   let currentStreak = 0;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   let checkDate = new Date(today);
+
+  // If today is empty, check from yesterday — streak is still "active"
+  // as long as it ended no more than 1 day ago
+  if (!submissionsByDay[checkDate.getTime()]) {
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+
   while (true) {
     const count = submissionsByDay[checkDate.getTime()] || 0;
     if (count > 0) {
@@ -53,271 +52,248 @@ export const Coach: React.FC<CoachProps> = ({ userInfo, submissions }) => {
     }
   }
 
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  // ── Tasks ──────────────────────────────────────────────────────────────────
+  const [tasks, setTasks] = useState<CoachTask[]>([]);
   const [regenLoading, setRegenLoading] = useState(false);
+
+  const generateFallbackTasks = (): CoachTask[] => [
+    { id: 'task-1', title: 'Master Greedy Choice Property', category: 'Greedy', difficulty: currentRating + 100, completed: false, desc: `Solve 2 problems rating ${currentRating + 100} with "greedy" tag. Prove correctness before typing.` },
+    { id: 'task-2', title: 'Virtual Contest Simulation', category: 'Simulation', difficulty: currentRating, completed: false, desc: 'Run a virtual Div. 3 or 2 contest. Solve A & B within 45 minutes.' },
+    { id: 'task-3', title: 'Upsolve a Hard Drop', category: 'Dynamic Programming', difficulty: currentRating + 200, completed: false, desc: 'Pick your last rated contest, find the first unsolved problem, upsolve it.' },
+    { id: 'task-4', title: 'Speed & Zero-Error Drill', category: 'Implementation', difficulty: Math.max(800, currentRating - 200), completed: true, desc: `Solve 3 problems of rating ${Math.max(800, currentRating - 200)} with 0 wrong submissions.` },
+  ];
 
   const handleRegenerate = async () => {
     setRegenLoading(true);
     try {
       const data = await regenerateTasks(userInfo.handle);
-      const mapped: TaskItem[] = data.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        category: t.category,
-        difficulty: t.difficulty,
-        completed: t.completed,
-        desc: t.desc
-      }));
-      setTasks(mapped);
-    } catch (err) {
-      console.warn('Failed to regenerate practice plan:', err);
+      setTasks(data.map((t: any) => ({ id: t.id, title: t.title, category: t.category, difficulty: t.difficulty, completed: t.completed, desc: t.desc })));
+    } catch {
+      console.warn('Failed to regenerate');
     } finally {
       setRegenLoading(false);
     }
   };
 
-  // Fetch tasks on mount
   useEffect(() => {
-    const fetchTasks = async () => {
+    const load = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/user/${userInfo.handle}/tasks`);
-        const json = await response.json();
-        if (json.status === 'OK' && json.result && json.result.length > 0) {
-          // Map database structure to TaskItem
-          const mapped: TaskItem[] = json.result.map((t: any) => ({
-            id: t.id,
-            title: t.title,
-            category: t.category,
-            difficulty: t.difficulty,
-            completed: t.completed,
-            desc: t.desc
-          }));
-          setTasks(mapped);
-        } else {
-          // Generate default client-side fallback if backend tasks is empty
-          generateFallbackTasks();
-        }
-      } catch (err) {
-        console.warn('Failed to fetch tasks from backend database, using client fallbacks:', err);
-        generateFallbackTasks();
+        const serverTasks = await fetchCoachTasks(userInfo.handle);
+        setTasks(serverTasks.length > 0 ? serverTasks : generateFallbackTasks());
+      } catch {
+        setTasks(generateFallbackTasks());
       }
     };
+    load();
+  }, [userInfo.handle]);
 
-    const generateFallbackTasks = () => {
-      setTasks([
-        {
-          id: 'task-1',
-          title: 'Master Greedy Choice Property',
-          category: 'Greedy',
-          difficulty: currentRating + 100,
-          completed: false,
-          desc: 'Solve 2 problems with rating ' + (currentRating + 100) + ' featuring the "greedy" tag. Focus on proving correctness before typing.'
-        },
-        {
-          id: 'task-2',
-          title: 'Practice Under Pressure (Virtual Contest)',
-          category: 'Simulation',
-          difficulty: currentRating,
-          completed: false,
-          desc: 'Run a virtual contest on any past Div. 3 or Div. 2 round. Try to solve problems A and B within the first 45 minutes.'
-        },
-        {
-          id: 'task-3',
-          title: 'Topic Upsolving Challenge',
-          category: 'Dynamic Programming',
-          difficulty: currentRating + 200,
-          completed: false,
-          desc: 'Select your last contest rating drop, locate the first problem you failed to solve in-contest, and up-solve it.'
-        },
-        {
-          id: 'task-4',
-          title: 'Speed & Accuracy Drill',
-          category: 'Math / Implementation',
-          difficulty: Math.max(800, currentRating - 200),
-          completed: true, // Mark one complete to show visual
-          desc: 'Solve 3 problems of rating ' + Math.max(800, currentRating - 200) + ' with exactly 0 wrong submissions. Focus on speed.'
-        }
-      ]);
-    };
-
-    fetchTasks();
-  }, [userInfo.handle, currentRating]);
-
-  const toggleTask = async (id: string) => {
-    // 1. Trigger backend toggle endpoint
+  // Optimistic toggle with rollback
+  const handleToggle = async (id: string) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
     try {
-      const response = await fetch(`http://localhost:5000/api/user/${userInfo.handle}/tasks/toggle`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ taskId: id })
-      });
-      const json = await response.json();
-      if (json.status === 'OK') {
-        // Toggle locally
-        setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-      }
-    } catch (err) {
-      console.warn('Failed to toggle task in PostgreSQL backend, falling back to local toggle:', err);
-      // Fallback
+      await toggleCoachTask(userInfo.handle, id);
+    } catch {
       setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
     }
   };
 
-  const getHeatmapColor = (count: number) => {
-    if (!count || count === 0) return 'bg-slate-900 border-slate-800';
-    if (count === 1) return 'bg-cyan-950/65 border-cyan-850';
-    if (count <= 3) return 'bg-cyan-700/60 border-cyan-600';
-    return 'bg-cyan-500 border-cyan-400';
+  const getHeatColor = (count: number) => {
+    if (!count) return 'bg-slate-900 border-slate-800/80';
+    if (count === 1) return 'bg-cyan-900/60 border-cyan-800/40';
+    if (count <= 3) return 'bg-cyan-600/70 border-cyan-500/40';
+    return 'bg-cyan-400 border-cyan-300 shadow-[0_0_6px_rgba(34,211,238,0.4)]';
   };
 
   const completedCount = tasks.filter(t => t.completed).length;
+  const progressPct = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
+
+  const trainingPlans = [
+    { icon: Code2, title: 'Dynamic Programming 101', tag: 'Highly Recommended', tagColor: 'text-rose-400 bg-rose-500/10 border-rose-500/20', desc: `Focus: Knapsack, Digit DP, State compression. Target: ${currentRating + 100}–${currentRating + 300}`, color: 'border-rose-500/20 hover:border-rose-500/35' },
+    { icon: Target, title: 'Graph Traversals (DFS/BFS)', tag: 'Standard Path', tagColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20', desc: `Connected components, Tree diameters, Shortest paths. Target: ${currentRating}`, color: 'border-slate-800 hover:border-cyan-500/30' },
+    { icon: BookOpen, title: 'Binary Search on Answer', tag: 'Advanced Drill', tagColor: 'text-violet-400 bg-violet-500/10 border-violet-500/20', desc: `Monotonicity identification, Floating-point search. Target: ${currentRating + 150}`, color: 'border-slate-800 hover:border-violet-500/30' },
+  ];
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* 1. Daily Activity Streak */}
-      <div className="glass-card p-6 rounded-2xl flex flex-col lg:flex-row justify-between items-center gap-6">
-        <div className="space-y-2 text-center lg:text-left">
-          <h3 className="text-lg font-bold text-white flex items-center justify-center lg:justify-start gap-2">
-            <Zap size={20} className="text-cyan-400" />
-            Consistency Streak Tracker
-          </h3>
-          <p className="text-xs text-slate-400">Practicing regularly is the secret to scaling the ranks. Solve at least 1 problem daily.</p>
-          <div className="flex justify-center lg:justify-start items-baseline gap-2 pt-2">
-            <span className="text-4xl font-black text-cyan-400">{currentStreak}</span>
-            <span className="text-sm text-slate-400 font-semibold">Days Active Streak</span>
-          </div>
-        </div>
+    <div className="space-y-6 animate-fade-in-up">
 
-        {/* Heatmap Grid */}
-        <div className="space-y-2">
-          <div className="grid grid-cols-7 gap-1.5 p-3 bg-slate-950/50 rounded-xl border border-slate-900">
-            {streakDays.map((day, idx) => {
-              const count = submissionsByDay[day.getTime()] || 0;
-              return (
-                <div 
-                  key={idx} 
-                  title={`${day.toLocaleDateString()}: ${count} submissions`}
-                  className={`w-7 h-7 rounded border transition-colors cursor-help ${getHeatmapColor(count)}`}
-                />
-              );
-            })}
-          </div>
-          <div className="flex justify-between text-[10px] text-slate-500 px-1">
-            <span>28 days ago</span>
-            <div className="flex items-center gap-1">
-              <span>Less</span>
-              <span className="w-2.5 h-2.5 rounded bg-slate-900 border border-slate-800"></span>
-              <span className="w-2.5 h-2.5 rounded bg-cyan-700"></span>
-              <span className="w-2.5 h-2.5 rounded bg-cyan-500"></span>
-              <span>More</span>
+      {/* ── Streak Hero ───────────────────────────────────────────────────── */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-[#0a0f1e] to-[#060b14] border border-[#1b2b48] rounded-2xl p-6">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center gap-6 justify-between">
+          {/* Left: streak info */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 bg-cyan-500/10 border border-cyan-500/20 rounded-xl flex items-center justify-center">
+                <Zap size={17} className="text-cyan-400" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-slate-500 font-extrabold">Consistency Tracker</p>
+                <p className="text-sm font-bold text-white">Practice at least 1 problem daily to build streaks</p>
+              </div>
             </div>
-            <span>Today</span>
+
+            <div className="flex items-baseline gap-3">
+              <span className="text-6xl font-black text-white leading-none">{currentStreak}</span>
+              <div>
+                <p className="text-sm font-bold text-cyan-400">Day Streak 🔥</p>
+                <p className="text-[11px] text-slate-500">consecutive active days</p>
+              </div>
+            </div>
+
+            {currentStreak >= 3 && (
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-full w-fit">
+                <Flame size={12} /> On fire! Keep it going
+              </div>
+            )}
+          </div>
+
+          {/* Right: heatmap */}
+          <div className="space-y-2">
+            <div className="grid grid-cols-7 gap-1.5 p-3 bg-[#060b13] rounded-xl border border-slate-900">
+              {streakDays.map((day, idx) => {
+                const count = submissionsByDay[day.getTime()] || 0;
+                const isToday = day.getTime() === today.getTime();
+                return (
+                  <div
+                    key={idx}
+                    title={`${day.toLocaleDateString()}: ${count} submission${count !== 1 ? 's' : ''}`}
+                    className={`w-7 h-7 rounded border transition-all cursor-help ${getHeatColor(count)} ${isToday ? 'ring-1 ring-cyan-400 ring-offset-1 ring-offset-[#060b13]' : ''}`}
+                  />
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-600 px-1">
+              <span>28 days ago</span>
+              <div className="flex items-center gap-1">
+                <span>Less</span>
+                <div className="w-2 h-2 rounded bg-slate-900 border border-slate-800" />
+                <div className="w-2 h-2 rounded bg-cyan-700" />
+                <div className="w-2 h-2 rounded bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.5)]" />
+                <span>More</span>
+              </div>
+              <span>Today</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 2. Practice Roadmap (Phase 4 MVP) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Weekly Roadmap Card */}
-        <div className="glass-card p-6 rounded-2xl lg:col-span-2 space-y-4">
-          <div className="flex justify-between items-center flex-wrap gap-2">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Calendar size={18} className="text-cyan-400" />
-              Dynamic Weekly Plan
-            </h3>
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold text-slate-400">
-                Progress: {completedCount}/{tasks.length} ({tasks.length > 0 ? ((completedCount / tasks.length) * 100).toFixed(0) : 0}%)
-              </span>
+      {/* ── Main Content Grid ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        {/* Weekly Plan */}
+        <div className="lg:col-span-2 bg-[#080e1a] border border-[#121e35] rounded-2xl overflow-hidden">
+          <div className="px-6 pt-5 pb-4 border-b border-[#121e35]/70">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
+                  <Calendar size={15} className="text-cyan-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Weekly Practice Plan</h3>
+                  <p className="text-[10px] text-slate-500">AI-generated based on your profile</p>
+                </div>
+              </div>
               <button
                 onClick={handleRegenerate}
                 disabled={regenLoading}
-                className="text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 px-3 py-1 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-cyan-400 bg-slate-900 hover:bg-cyan-500/10 border border-slate-800 hover:border-cyan-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
               >
-                {regenLoading ? 'Regenerating...' : 'Regenerate Plan'}
+                <RefreshCw size={12} className={regenLoading ? 'animate-spin' : ''} />
+                {regenLoading ? 'Generating...' : 'Regenerate'}
               </button>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mt-4 space-y-1.5">
+              <div className="flex justify-between text-[10px] text-slate-500">
+                <span>{completedCount}/{tasks.length} tasks completed</span>
+                <span className="font-bold text-cyan-400">{Math.round(progressPct)}%</span>
+              </div>
+              <div className="h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-600 to-cyan-400 transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="px-6 py-5 space-y-3">
             {tasks.map((task) => (
-              <div 
+              <div
                 key={task.id}
-                onClick={() => toggleTask(task.id)}
-                className={`glass-panel p-4 rounded-xl border cursor-pointer flex items-start gap-4 transition-all hover:bg-slate-800/20 ${task.completed ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-slate-800 hover:border-cyan-500/20'}`}
+                onClick={() => handleToggle(task.id)}
+                className={`flex items-start gap-4 p-4 rounded-xl border cursor-pointer transition-all group ${
+                  task.completed
+                    ? 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/35'
+                    : 'bg-slate-900/30 border-slate-800 hover:border-cyan-500/25 hover:bg-slate-900/50'
+                }`}
               >
-                <div className="mt-1">
-                  <input 
-                    type="checkbox" 
-                    checked={task.completed} 
-                    onChange={() => {}} // toggled by parent div click
-                    className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-cyan-500 cursor-pointer focus:ring-0 focus:ring-offset-0"
-                  />
+                <div className={`flex-shrink-0 mt-0.5 transition-colors ${task.completed ? 'text-emerald-400' : 'text-slate-600 group-hover:text-slate-400'}`}>
+                  {task.completed ? <CheckCircle2 size={20} /> : <Circle size={20} />}
                 </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex justify-between items-start">
-                    <h4 className={`text-sm font-bold ${task.completed ? 'line-through text-slate-500' : 'text-white'}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <p className={`text-sm font-semibold leading-snug transition-colors ${task.completed ? 'line-through text-slate-500' : 'text-white group-hover:text-cyan-50'}`}>
                       {task.title}
-                    </h4>
-                    <span className="text-xs bg-slate-900 border border-slate-800 text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
+                    </p>
+                    <span className="flex-shrink-0 text-[10px] font-black text-slate-500 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-md uppercase">
                       {task.category}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">{task.desc}</p>
-                  <div className="pt-2 flex items-center gap-2 text-[10px] font-bold text-emerald-400">
-                    <span>Target Difficulty: {task.difficulty}</span>
-                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">{task.desc}</p>
+                  <p className="text-[10px] text-emerald-400 font-bold mt-2">⚡ Target: {task.difficulty}</p>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Topic-focused learning plans */}
-        <div className="glass-card p-6 rounded-2xl space-y-4">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Dumbbell size={18} className="text-rose-400" />
-            Training Recommendations
-          </h3>
-          <p className="text-xs text-slate-400">We recommend focusing on these custom skill plans based on your weaknesses:</p>
-
-          <div className="space-y-3">
-            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-rose-500/20 transition-all">
-              <div className="flex justify-between text-xs">
-                <span className="font-bold text-white">Dynamic Programming 101</span>
-                <span className="text-rose-400 font-extrabold">Highly Recommended</span>
+        {/* Training Plans */}
+        <div className="bg-[#080e1a] border border-[#121e35] rounded-2xl overflow-hidden">
+          <div className="px-5 pt-5 pb-4 border-b border-[#121e35]/70">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                <Dumbbell size={15} className="text-rose-400" />
               </div>
-              <p className="text-xs text-slate-400">Focus: Knapsack variations, Digit DP basics, State compression. Recommended problem target range: <span className="font-bold text-slate-300">{currentRating + 100} - {currentRating + 300}</span>.</p>
-              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
-                Begin Plan <ChevronRight size={14} />
-              </button>
-            </div>
-
-            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-cyan-500/20 transition-all">
-              <div className="flex justify-between text-xs">
-                <span className="font-bold text-white">Graph Traversals (DFS/BFS)</span>
-                <span className="text-slate-400">Standard Path</span>
+              <div>
+                <h3 className="text-sm font-bold text-white">Training Plans</h3>
+                <p className="text-[10px] text-slate-500">Curated skill paths</p>
               </div>
-              <p className="text-xs text-slate-400">Focus: Connected components, Tree diameters, Shortest path trees. Target rating: <span className="font-bold text-slate-300">{currentRating}</span>.</p>
-              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
-                Begin Plan <ChevronRight size={14} />
-              </button>
-            </div>
-
-            <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2 hover:border-cyan-500/20 transition-all">
-              <div className="flex justify-between text-xs">
-                <span className="font-bold text-white">Binary Search on Answer</span>
-                <span className="text-slate-400">Advanced Drill</span>
-              </div>
-              <p className="text-xs text-slate-400">Focus: Monotonicity identification, Floating-point search. Target rating: <span className="font-bold text-slate-300">{currentRating + 150}</span>.</p>
-              <button className="text-xs font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 pt-1">
-                Begin Plan <ChevronRight size={14} />
-              </button>
             </div>
           </div>
+
+          <div className="px-5 py-5 space-y-3">
+            {trainingPlans.map(({ icon: Icon, title, tag, tagColor, desc, color }) => (
+              <div
+                key={title}
+                className={`relative overflow-hidden bg-[#060b13] border rounded-xl p-4 transition-all group ${color}`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Icon size={14} className="text-slate-500 group-hover:text-slate-300 transition-colors flex-shrink-0" />
+                      <span className="text-xs font-bold text-white leading-snug">{title}</span>
+                    </div>
+                    <span className={`flex-shrink-0 text-[9px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md border ${tagColor}`}>
+                      {tag}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">{desc}</p>
+                  <button
+                    onClick={() => onNavigate('analysis')}
+                    className="flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-bold transition-colors group/btn cursor-pointer"
+                  >
+                    View Problems
+                    <ChevronRight size={12} className="group-hover/btn:translate-x-0.5 transition-transform" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
+
       </div>
     </div>
   );

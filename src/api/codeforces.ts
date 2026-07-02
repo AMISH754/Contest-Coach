@@ -1,3 +1,6 @@
+// Single source of truth for backend URL — set VITE_BACKEND_URL in .env
+const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://localhost:5000';
+
 export interface CFUserInfo {
   handle: string;
   rating?: number;
@@ -51,14 +54,23 @@ export interface CFSubmission {
   memoryConsumedBytes?: number;
 }
 
+export interface CoachTask {
+  id: string;
+  title: string;
+  category: string;
+  difficulty: number;
+  completed: boolean;
+  desc: string;
+}
+
 // Generate realistic mock data for fallback/demo
 export const getMockData = (handle: string) => {
   const seed = handle.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  
+
   // 1. Mock User Info
   const curRating = 1350 + (seed % 600);
   const maxRating = curRating + 120;
-  
+
   const getRank = (r: number) => {
     if (r < 1200) return 'Newbie';
     if (r < 1400) return 'Pupil';
@@ -77,8 +89,8 @@ export const getMockData = (handle: string) => {
     maxRank: getRank(maxRating),
     avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${handle}`,
     titlePhoto: `https://api.dicebear.com/7.x/identicon/svg?seed=${handle}`,
-    organization: "Global Competitive Programming Academy",
-    country: "United States",
+    organization: 'Global Competitive Programming Academy',
+    country: 'United States',
     contribution: seed % 50,
     friendOfCount: seed % 200,
   };
@@ -106,7 +118,7 @@ export const getMockData = (handle: string) => {
   const submissionTags = ['implementation', 'math', 'dp', 'greedy', 'sortings', 'graphs', 'binary search', 'trees', 'strings', 'data structures'];
   const submissions: CFSubmission[] = [];
   const startSubSec = startSec + 12 * 30 * 24 * 3600;
-  
+
   for (let i = 0; i < 180; i++) {
     const isOk = (seed + i) % 10 < 6; // 60% success rate
     const verdict = isOk ? 'OK' : ((seed + i) % 10 < 8 ? 'WRONG_ANSWER' : 'TIME_LIMIT_EXCEEDED');
@@ -140,13 +152,18 @@ export const getMockData = (handle: string) => {
   return { userInfo, ratingHistory, submissions };
 };
 
-export const fetchCodeforcesData = async (handle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
-  
+export interface FetchCodeforcesResult {
+  userInfo: CFUserInfo;
+  ratingHistory: CFRatingChange[];
+  submissions: CFSubmission[];
+  isMockFallback: boolean;
+}
+
+export const fetchCodeforcesData = async (handle: string): Promise<FetchCodeforcesResult> => {
   if (!handle || handle.toLowerCase() === 'demo' || handle.toLowerCase() === 'tourist_coach') {
     // Delay to simulate API call
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    return getMockData(handle || 'tourist_coach');
+    return { ...getMockData(handle || 'tourist_coach'), isMockFallback: true };
   }
 
   try {
@@ -157,21 +174,14 @@ export const fetchCodeforcesData = async (handle: string) => {
       throw new Error(json.comment || 'Failed to fetch user info from backend');
     }
 
-    return json.result as {
-      userInfo: CFUserInfo;
-      ratingHistory: CFRatingChange[];
-      submissions: CFSubmission[];
-    };
+    return { ...json.result, isMockFallback: false } as FetchCodeforcesResult;
   } catch (error) {
-    console.warn(`Failed to fetch from backend for ${handle}, falling back to client-side simulated data. Error:`, error);
-    // Return mock data but indicate it's a fallback
-    const mock = getMockData(handle);
-    return mock;
+    console.warn(`Failed to fetch from backend for ${handle}, falling back to simulated data. Error:`, error);
+    return { ...getMockData(handle), isMockFallback: true };
   }
 };
 
 export const fetchRecommendations = async (handle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
   if (!handle || handle.toLowerCase() === 'demo') {
     await new Promise((resolve) => setTimeout(resolve, 600));
     return [
@@ -190,7 +200,7 @@ export const fetchRecommendations = async (handle: string) => {
     }
     return json.result as CFProblem[];
   } catch (error) {
-    console.warn(`Failed to fetch recommendations from backend for ${handle}, falling back to static pool.`, error);
+    console.warn(`Failed to fetch recommendations for ${handle}, using fallback.`, error);
     return [
       { contestId: 1915, index: 'E', name: 'Romantic Glasses', type: 'PROGRAMMING', rating: 1300, tags: ['data structures', 'math'] },
       { contestId: 1899, index: 'C', name: 'Yarik and Array', type: 'PROGRAMMING', rating: 1000, tags: ['dp', 'greedy'] },
@@ -200,7 +210,6 @@ export const fetchRecommendations = async (handle: string) => {
 };
 
 export const regenerateTasks = async (handle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
   if (!handle || handle.toLowerCase() === 'demo') {
     await new Promise((resolve) => setTimeout(resolve, 800));
     return [
@@ -220,12 +229,47 @@ export const regenerateTasks = async (handle: string) => {
   return json.result;
 };
 
-export const sendAICoachMessage = async (handle: string, message: string, history: { role: 'user' | 'model'; parts: string }[]) => {
-  const BACKEND_URL = 'http://localhost:5000';
+export const fetchCoachTasks = async (handle: string): Promise<CoachTask[]> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/user/${handle}/tasks`);
+    const json = await response.json();
+    if (json.status === 'OK' && json.result) {
+      return json.result as CoachTask[];
+    }
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch tasks for ${handle}:`, error);
+    return [];
+  }
+};
+
+export const toggleCoachTask = async (handle: string, taskId: string): Promise<void> => {
+  const response = await fetch(`${BACKEND_URL}/api/user/${handle}/tasks/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskId })
+  });
+  const json = await response.json();
+  if (json.status !== 'OK') {
+    throw new Error(json.comment || 'Failed to toggle task');
+  }
+};
+
+// Gemini-compatible history type: parts must be an array of Part objects
+export interface AICoachHistoryEntry {
+  role: 'user' | 'model';
+  parts: { text: string }[];
+}
+
+export const sendAICoachMessage = async (
+  handle: string,
+  message: string,
+  history: AICoachHistoryEntry[]
+) => {
   if (!handle || handle.toLowerCase() === 'demo') {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     if (message.toLowerCase().includes('schedule')) {
-      return "Here is your simulated 4-week practice schedule. Concentrate on implementation and math.";
+      return 'Here is your simulated 4-week practice schedule. Concentrate on implementation and math.';
     }
     return `This is a demo assistant. You said: "${message}". Connect a live Codeforces account and set GEMINI_API_KEY to speak with the real Gemini AI Coach.`;
   }
@@ -243,7 +287,6 @@ export const sendAICoachMessage = async (handle: string, message: string, histor
 };
 
 export const linkLeetCodeProfile = async (handle: string, leetcodeHandle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -264,7 +307,6 @@ export const linkLeetCodeProfile = async (handle: string, leetcodeHandle: string
 };
 
 export const syncLeetCodeProfile = async (handle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/sync`, {
     method: 'POST',
   });
@@ -283,7 +325,6 @@ export const syncLeetCodeProfile = async (handle: string) => {
 };
 
 export const unlinkLeetCodeProfile = async (handle: string) => {
-  const BACKEND_URL = 'http://localhost:5000';
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/unlink`, {
     method: 'POST',
   });
@@ -298,4 +339,3 @@ export const unlinkLeetCodeProfile = async (handle: string) => {
     leetcodeHard: 0;
   };
 };
-
