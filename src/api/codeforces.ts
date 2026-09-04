@@ -159,7 +159,7 @@ export interface FetchCodeforcesResult {
   isMockFallback: boolean;
 }
 
-export const fetchCodeforcesData = async (handle: string): Promise<FetchCodeforcesResult> => {
+export const fetchCodeforcesData = async (handle: string, force: boolean = false): Promise<FetchCodeforcesResult> => {
   if (!handle || handle.toLowerCase() === 'demo' || handle.toLowerCase() === 'tourist_coach') {
     // Delay to simulate API call
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -167,7 +167,7 @@ export const fetchCodeforcesData = async (handle: string): Promise<FetchCodeforc
   }
 
   try {
-    const response = await fetch(`${BACKEND_URL}/api/user/${handle}`);
+    const response = await fetch(`${BACKEND_URL}/api/user/${handle}${force ? '?force=true' : ''}`);
     const json = await response.json();
 
     if (json.status !== 'OK' || !json.result) {
@@ -180,6 +180,7 @@ export const fetchCodeforcesData = async (handle: string): Promise<FetchCodeforc
     return { ...getMockData(handle), isMockFallback: true };
   }
 };
+
 
 export const fetchRecommendations = async (handle: string) => {
   if (!handle || handle.toLowerCase() === 'demo') {
@@ -230,8 +231,11 @@ export const regenerateTasks = async (handle: string) => {
 };
 
 export const fetchCoachTasks = async (handle: string): Promise<CoachTask[]> => {
+  if (!handle || handle.toLowerCase() === 'demo') {
+    return [];
+  }
   try {
-    const response = await fetch(`${BACKEND_URL}/api/user/${handle}/tasks`);
+    const response = await fetch(`${BACKEND_URL}/api/user/${handle}/tasks`, {});
     const json = await response.json();
     if (json.status === 'OK' && json.result) {
       return json.result as CoachTask[];
@@ -244,6 +248,7 @@ export const fetchCoachTasks = async (handle: string): Promise<CoachTask[]> => {
 };
 
 export const toggleCoachTask = async (handle: string, taskId: string): Promise<void> => {
+  if (!handle || handle.toLowerCase() === 'demo') return;
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/tasks/toggle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -260,6 +265,25 @@ export interface AICoachHistoryEntry {
   role: 'user' | 'model';
   parts: { text: string }[];
 }
+
+export const formatAsPlainText = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s*(.+)$/gm, '$1')
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/___([^_]+)___/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    .replace(/^[\*\-]\s+/gm, '• ')
+    .replace(/^>\s+/gm, '')
+    .trim();
+};
 
 export const sendAICoachMessage = async (
   handle: string,
@@ -283,7 +307,7 @@ export const sendAICoachMessage = async (
   if (json.status !== 'OK' || !json.result) {
     throw new Error(json.comment || 'Failed to get response from AI Coach');
   }
-  return json.result as string;
+  return formatAsPlainText(json.result as string);
 };
 
 export const linkLeetCodeProfile = async (handle: string, leetcodeHandle: string) => {
@@ -308,7 +332,7 @@ export const linkLeetCodeProfile = async (handle: string, leetcodeHandle: string
 
 export const syncLeetCodeProfile = async (handle: string) => {
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/sync`, {
-    method: 'POST',
+    method: 'POST'
   });
   const json = await response.json();
   if (json.status !== 'OK') {
@@ -326,7 +350,7 @@ export const syncLeetCodeProfile = async (handle: string) => {
 
 export const unlinkLeetCodeProfile = async (handle: string) => {
   const response = await fetch(`${BACKEND_URL}/api/user/${handle}/leetcode/unlink`, {
-    method: 'POST',
+    method: 'POST'
   });
   const json = await response.json();
   if (json.status !== 'OK') {
@@ -339,3 +363,30 @@ export const unlinkLeetCodeProfile = async (handle: string) => {
     leetcodeHard: 0;
   };
 };
+
+export interface CFContest {
+  id: number;
+  name: string;
+  type: string;
+  phase: string;
+  frozen: boolean;
+  durationSeconds: number;
+  startTimeSeconds?: number;
+  relativeTimeSeconds?: number;
+}
+
+export const fetchUpcomingContests = async (): Promise<CFContest[]> => {
+  try {
+    const response = await fetch('https://codeforces.com/api/contest.list?gym=false');
+    const json = await response.json();
+    if (json.status === 'OK' && Array.isArray(json.result)) {
+      return (json.result as CFContest[])
+        .filter(c => c.phase === 'BEFORE')
+        .sort((a, b) => (a.startTimeSeconds || 0) - (b.startTimeSeconds || 0));
+    }
+  } catch (error) {
+    console.warn('Could not fetch upcoming contests directly from CF:', error);
+  }
+  return [];
+};
+

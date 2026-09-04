@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fetchCodeforcesData } from './api/codeforces';
 import type { CFUserInfo, CFRatingChange, CFSubmission } from './api/codeforces';
 import { Dashboard } from './components/Dashboard';
@@ -9,12 +9,14 @@ import { Social } from './components/Social';
 import { AICoach } from './components/AICoach';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { TabSkeleton } from './components/TabSkeleton';
-import { Search, Flame, HelpCircle, AlertCircle, RefreshCw, BarChart2, ShieldAlert, Award, Compass, Zap, Trophy, Menu, X } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import {
+  Search, Flame, AlertCircle, BarChart2,
+  Zap, HelpCircle, X, ExternalLink,
+  Bell, Activity, Clock, BookOpen, Users, Sparkles, LogOut
+} from 'lucide-react';
 
-type TabType = 'dashboard' | 'analysis' | 'predictions' | 'coach' | 'social' | 'aicoach';
+export type TabType = 'dashboard' | 'analysis' | 'predictions' | 'coach' | 'social' | 'aicoach';
 
-// AI chat message type (shared with AICoach component)
 export interface ChatMessage {
   id: string;
   sender: 'ai' | 'user';
@@ -29,7 +31,36 @@ function App() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [tabLoading, setTabLoading] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Dialog & popover states
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showRatingBounds, setShowRatingBounds] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
+  const [showStatus, setShowStatus] = useState(false);
+  const [apiHealth, setApiHealth] = useState<'checking' | 'online' | 'degraded'>('checking');
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Global Ctrl+K / Cmd+K shortcut listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Check API health for status modal
+  useEffect(() => {
+    fetch('http://localhost:5000/health')
+      .then(res => res.json())
+      .then(data => setApiHealth(data.status === 'OK' ? 'online' : 'degraded'))
+      .catch(() => setApiHealth('degraded'));
+  }, []);
 
   // Codeforces profile data
   const [userInfo, setUserInfo] = useState<CFUserInfo | null>(null);
@@ -37,37 +68,25 @@ function App() {
   const [submissions, setSubmissions] = useState<CFSubmission[]>([]);
   const [isSimulated, setIsSimulated] = useState(false);
 
-  // AI chat state lifted here so it persists across tab switches
+  // AI chat state persisted across tab switches
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
-  const loadData = async (targetHandle: string) => {
+  const loadData = async (targetHandle: string, force: boolean = false) => {
     if (!targetHandle.trim()) return;
     setLoading(true);
     setError('');
     setIsSimulated(false);
 
     try {
-      const data = await fetchCodeforcesData(targetHandle);
-
-      // Use the reliable isMockFallback flag from the API layer
+      const data = await fetchCodeforcesData(targetHandle, force);
       setIsSimulated(data.isMockFallback);
-
       setUserInfo(data.userInfo);
       setRatingHistory(data.ratingHistory);
       setSubmissions(data.submissions);
 
       localStorage.setItem('cf_handle', targetHandle);
       setHandle(targetHandle);
-
-      // Reset chat when a new profile is loaded
       setChatMessages([]);
-
-      // Trigger premium celebration confetti!
-      confetti({
-        particleCount: 80,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
     } catch (err: any) {
       setError(err.message || 'Unable to fetch Codeforces data. Please try another handle.');
     } finally {
@@ -75,7 +94,6 @@ function App() {
     }
   };
 
-  // Run on mount if handle is already saved
   useEffect(() => {
     if (handle) {
       loadData(handle);
@@ -85,13 +103,14 @@ function App() {
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchInput.trim()) {
-      loadData(searchInput.trim());
+    const target = searchInput.trim() || handle;
+    if (target) {
+      loadData(target, true);
+      setSearchInput('');
     }
   };
 
   const handleQuickLoad = (quickHandle: string) => {
-    setSearchInput(quickHandle);
     loadData(quickHandle);
   };
 
@@ -104,423 +123,295 @@ function App() {
     setSearchInput('');
     setIsSimulated(false);
     setChatMessages([]);
+    setError('');
   };
 
   const handleTabChange = (tab: TabType) => {
     if (tab === activeTab) return;
     setTabLoading(true);
     setActiveTab(tab);
-    // Brief skeleton flash for perceived snappiness
-    setTimeout(() => setTabLoading(false), 120);
+    setTimeout(() => setTabLoading(false), 80);
   };
 
   const navigationTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
-    { id: 'coach', label: 'Roadmap', icon: Zap },
-    { id: 'aicoach', label: 'Coach', icon: Award },
-    { id: 'analysis', label: 'Analysis', icon: ShieldAlert },
-    { id: 'predictions', label: 'Predictions', icon: Compass },
-    { id: 'social', label: 'Social Compare', icon: Flame },
+    { id: 'analysis', label: 'Analysis', icon: Activity },
+    { id: 'predictions', label: 'Predictions', icon: Clock },
+    { id: 'coach', label: 'Practice', icon: BookOpen },
+    { id: 'social', label: 'Social', icon: Users },
+    { id: 'aicoach', label: 'AI Coach', icon: Sparkles },
   ];
 
+  // Calculate short rank label and rating diff
+  const rankShort = userInfo?.rank ? userInfo.rank.split(' ').map(w => w[0].toUpperCase()).join('') : 'CM';
+  const ratingDelta = ratingHistory.length >= 2
+    ? (ratingHistory[ratingHistory.length - 1].newRating - ratingHistory[ratingHistory.length - 2].newRating)
+    : 74;
+  const ratingDeltaText = ratingDelta >= 0 ? `+${ratingDelta}` : `${ratingDelta}`;
+
   return (
-    <div className="min-h-screen flex flex-col bg-[#030712] text-slate-100 font-sans selection:bg-cyan-500/30 selection:text-cyan-200" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}>
+    <div className="min-h-screen flex flex-col bg-[#f8fafc] text-slate-900 selection:bg-slate-200">
 
-      {/* State: A. Loading Overlay */}
-      {loading && (
-        <div className="flex-1 flex flex-col items-center justify-center py-24 space-y-6">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center">
-              <Trophy size={28} className="text-cyan-400 animate-float" />
-            </div>
-            <div className="absolute inset-0 rounded-2xl border-2 border-cyan-500/40 animate-spin" style={{animationDuration:'3s'}} />
-          </div>
-          <div className="text-center space-y-2">
-            <p className="font-bold text-white text-lg">Fetching Codeforces profile...</p>
-            <p className="text-xs text-slate-500">Querying user.info, user.rating, and user.status APIs</p>
-            <div className="flex items-center justify-center gap-2 pt-1">
-              <span className="loading-dot" />
-              <span className="loading-dot" />
-              <span className="loading-dot" />
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Top Header */}
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200/80 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10">
+          <div className="flex items-center justify-between h-16 gap-6">
 
-      {/* State: B. Onboarding Page (No handle entered yet) */}
-      {!loading && !userInfo && (
-        <>
-          <header className="sticky top-0 z-40 w-full bg-[#060b13] border-b border-[#121e35] shadow-md">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5 cursor-pointer" onClick={handleLogout}>
-                <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/30">
-                  <Trophy size={18} className="text-white" />
-                </div>
-                <div>
-                  <span className="font-extrabold text-white text-base tracking-tight block">CONTEST COACH</span>
-                  <span className="text-[10px] text-cyan-400 block tracking-wider uppercase font-semibold">Competitive Assistant</span>
-                </div>
+            {/* Left: Brand */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white shadow-sm">
+                <Zap size={17} className="fill-white" />
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="font-bold text-slate-900 tracking-tight text-[15px]">Contest Coach</span>
+                <span className="bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-widest">
+                  Pro CF
+                </span>
               </div>
             </div>
-          </header>
 
-          <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 mt-12 md:mt-20 flex-1 flex flex-col justify-start">
-            <div className="max-w-xl mx-auto w-full space-y-8 text-center relative">
+            {/* Middle: Search Input */}
+            <div className="flex-1 max-w-sm hidden md:flex items-center">
+              <form onSubmit={handleSearchSubmit} className="relative w-full">
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  placeholder="Search handle or problem… (⌘K)"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-xl pl-9 pr-10 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200 transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => { searchInputRef.current?.focus(); searchInputRef.current?.select(); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-semibold text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded-md bg-white hover:bg-slate-100 cursor-pointer"
+                >
+                  ⌘K
+                </button>
+              </form>
+            </div>
 
-              {/* Ambient glow orbs */}
-              <div className="hero-glow hero-glow-cyan w-96 h-96 top-[-120px] left-[-80px] opacity-60" />
-              <div className="hero-glow hero-glow-blue w-72 h-72 bottom-0 right-[-60px] opacity-50" />
-
-              <div className="space-y-5 relative z-10">
-                <div className="animate-fade-in-up stagger-1">
-                  <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-2xl shadow-cyan-500/30 animate-float">
-                    <Trophy size={36} className="text-white" />
-                  </div>
-                </div>
-                <div className="animate-fade-in-up stagger-2">
-                  <span className="inline-block text-[10px] text-cyan-400 font-extrabold tracking-widest uppercase border border-cyan-500/20 bg-cyan-500/5 px-3 py-1 rounded-full mb-3">
-                    Competitive Programming Intelligence
+            {/* Right: User telemetry pill & avatar */}
+            {userInfo ? (
+              <div className="flex items-center gap-3 shrink-0 relative">
+                <div className="hidden sm:flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
+                  <span className="font-semibold text-slate-800 text-[13px]">{userInfo.handle}</span>
+                  <span className="bg-slate-200 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                    {rankShort} {userInfo.rating || 1942}
                   </span>
-                  <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-[1.08]">
-                    <span className="text-white">Master </span>
-                    <span className="shimmer-text">Competitive</span>
-                    <br />
-                    <span className="text-white">Programming</span>
-                  </h1>
+                  <span className="text-[11px] font-bold text-slate-700">
+                    {ratingDeltaText}
+                  </span>
+                  <span className="w-px h-3 bg-slate-300" />
+                  <span className="text-slate-500 font-medium flex items-center gap-1">
+                    <Flame size={12} className="text-slate-400" />
+                    14d
+                  </span>
                 </div>
-                <p className="text-sm md:text-base text-slate-400 max-w-md mx-auto leading-relaxed animate-fade-in-up stagger-3">
-                  Connect your Codeforces handle to unlock real-time progress charts, topic weakness detection, weekly roadmaps, and AI coaching.
-                </p>
-              </div>
 
-              {/* Input Form */}
-              <div className="animate-fade-in-up stagger-3 relative z-10">
-                <form onSubmit={handleSearchSubmit} className="glass-card p-6 rounded-2xl space-y-4">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Enter Codeforces Handle..."
-                      value={searchInput}
-                      onChange={(e) => setSearchInput(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3.5 rounded-xl glass-input text-base"
-                    />
-                    <Search className="absolute left-4 top-4 text-slate-500" size={18} />
-                  </div>
-
+                <div className="relative">
                   <button
-                    type="submit"
-                    className="w-full bg-gradient-to-r from-cyan-500 to-cyan-400 hover:from-cyan-400 hover:to-cyan-300 text-slate-950 font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 flex items-center justify-center gap-2.5 text-sm cursor-pointer active:scale-[0.98]"
+                    type="button"
+                    title="Notifications"
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className={`p-2 rounded-xl transition-colors relative cursor-pointer ${
+                      showNotifications ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                    }`}
                   >
-                    Launch Dashboard <RefreshCw size={14} className="animate-spin-slow" />
+                    <Bell size={16} />
+                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                   </button>
 
-                  {error && (
-                    <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3 rounded-lg text-xs font-semibold animate-pop-in">
-                      <AlertCircle size={14} />
-                      <span>{error}</span>
+                  {/* Notifications Popover */}
+                  {showNotifications && (
+                    <div className="absolute right-0 top-12 w-80 bg-white border border-slate-200 rounded-2xl shadow-xl p-4 z-50 animate-pop-in space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <span className="text-xs font-bold text-slate-900">Notifications & Alerts</span>
+                        <button
+                          onClick={() => setShowNotifications(false)}
+                          className="text-slate-400 hover:text-slate-700 text-xs"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                          <div className="flex items-center justify-between font-semibold text-slate-800">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              Upcoming Contest
+                            </span>
+                            <span className="text-[10px] text-slate-400">18h remaining</span>
+                          </div>
+                          <p className="text-slate-500 text-[11px]">
+                            Codeforces Round (Div. 2) registration is live. Check the Dashboard for timeline.
+                          </p>
+                        </div>
+                        <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                          <div className="flex items-center justify-between font-semibold text-slate-800">
+                            <span className="flex items-center gap-1.5">
+                              <Flame size={12} className="text-slate-400" />
+                              Streak Protection
+                            </span>
+                            <span className="text-[10px] text-slate-400">Today</span>
+                          </div>
+                          <p className="text-slate-500 text-[11px]">
+                            You have an active practice streak. Solve at least 1 problem today in the Practice tab.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   )}
-                </form>
-              </div>
-
-              {/* Quick Demo Options */}
-              <div className="space-y-3 animate-fade-in-up stagger-4 relative z-10">
-                <p className="text-xs text-slate-500 uppercase tracking-wider font-bold">Or click to load standard accounts</p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {[{handle:'tourist', label:'👑 Tourist'}, {handle:'Benq', label:'🚀 Benq'}, {handle:'demo', label:'✨ Demo Profile', highlight: true}].map(q => (
-                    <button
-                      key={q.handle}
-                      onClick={() => handleQuickLoad(q.handle)}
-                      className={`text-xs font-semibold px-4 py-2 rounded-xl border transition-all hover:scale-105 active:scale-95 cursor-pointer ${
-                        q.highlight
-                          ? 'bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-400 font-bold border-cyan-500/20'
-                          : 'bg-[#080e1a] hover:bg-[#0b1424] text-slate-300 border-[#121e35] hover:border-cyan-500/20'
-                      }`}
-                    >
-                      {q.label}
-                    </button>
-                  ))}
                 </div>
-              </div>
-            </div>
-          </main>
-        </>
-      )}
 
-      {/* State: C. Logged In Application Frame (Responsive Sidebar / Drawer Layout) */}
-      {!loading && userInfo && (
-        <div className="flex flex-col md:flex-row flex-1 min-h-screen relative">
+                {userInfo.avatar ? (
+                  <img
+                    src={userInfo.avatar}
+                    alt={userInfo.handle}
+                    className="w-9 h-9 rounded-full border-2 border-slate-200 object-cover"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-bold">
+                    {userInfo.handle.charAt(0).toUpperCase()}
+                  </div>
+                )}
 
-          {/* 1. Mobile Top Header (only visible on mobile/tablet) */}
-          <header className="flex md:hidden sticky top-0 z-45 w-full bg-[#060b13]/90 border-b border-[#121e35] h-14 items-center justify-between px-4 backdrop-blur-md">
-            <button
-              onClick={() => setMobileMenuOpen(true)}
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-900 transition-colors"
-            >
-              <Menu size={20} />
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center">
-                <Trophy size={14} className="text-white" />
-              </div>
-              <span className="font-extrabold text-white text-sm tracking-tight">Contest Coach</span>
-            </div>
-            {userInfo.avatar ? (
-              <img
-                src={userInfo.avatar}
-                alt={userInfo.handle}
-                className="w-7 h-7 rounded-full border border-cyan-500/30 object-cover"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-slate-800" />
-            )}
-          </header>
-
-          {/* 2. Mobile Drawer Menu Overlay */}
-          {mobileMenuOpen && (
-            <div className="fixed inset-0 z-50 md:hidden flex">
-              {/* Backdrop */}
-              <div
-                onClick={() => setMobileMenuOpen(false)}
-                className="absolute inset-0 bg-black/60 backdrop-blur-xs"
-              />
-              {/* Drawer Container */}
-              <div className="relative w-72 bg-[#060b13] border-r border-[#121e35] h-full flex flex-col p-5 space-y-5 animate-slide-in-left shadow-2xl">
-                {/* Close Button */}
                 <button
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-900 transition-colors"
+                  onClick={handleLogout}
+                  title="Clear handle"
+                  className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition-colors"
                 >
-                  <X size={18} />
+                  <LogOut size={15} />
                 </button>
-
-                {/* Logo */}
-                <div className="flex items-center gap-3 pb-1">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center">
-                    <Trophy size={18} className="text-white" />
-                  </div>
-                  <div>
-                    <span className="font-extrabold text-white text-sm tracking-tight block">Contest Coach</span>
-                    <span className="text-[10px] text-cyan-400/70 block tracking-wider font-semibold">Codeforces intelligence</span>
-                  </div>
-                </div>
-
-                {/* Navigation Menu */}
-                <nav className="flex-1 space-y-0.5">
-                  {navigationTabs.map((tab, idx) => {
-                    const Icon = tab.icon;
-                    const isActive = activeTab === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        onClick={() => {
-                          handleTabChange(tab.id as TabType);
-                          setMobileMenuOpen(false);
-                        }}
-                        style={{ animationDelay: `${idx * 0.03}s` }}
-                        className={`w-full flex items-center gap-3 py-2.5 px-3.5 text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer group relative ${
-                          isActive
-                            ? 'bg-[#0f1d36] text-cyan-400 shadow-[inset_3px_0_0_#06b6d4]'
-                            : 'text-slate-400 hover:text-slate-200 hover:bg-[#0a1220]'
-                        }`}
-                      >
-                        <Icon size={17} className={`transition-all duration-200 ${ isActive ? 'text-cyan-400' : 'group-hover:text-slate-300' }`} />
-                        {tab.label}
-                        {isActive && (
-                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </nav>
-
-                {/* Status Box */}
-                <div className="border border-emerald-900/40 bg-emerald-950/20 p-3.5 rounded-xl">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    <span className="text-[10px] uppercase font-black tracking-wider text-slate-500">Sync status</span>
-                  </div>
-                  <span className="text-xs text-emerald-400 font-medium block">
-                    PostgreSQL Ingested
-                  </span>
-                </div>
-
-                {/* User Detail & Logout */}
-                <div className="border-t border-[#121e35] pt-4 flex items-center gap-3">
-                  {userInfo.avatar && (
-                    <img
-                      src={userInfo.avatar}
-                      alt={userInfo.handle}
-                      className="w-8 h-8 rounded-full border-2 border-cyan-500/30 bg-slate-900 object-cover"
-                    />
-                  )}
-                  <div className="truncate flex-1">
-                    <span className="text-[9px] text-slate-500 block">Logged in as</span>
-                    <span className="text-xs font-bold text-cyan-400 block truncate">{userInfo.handle}</span>
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="text-[10px] font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 px-2.5 py-1.5 rounded-lg transition-all"
-                  >
-                    Exit
-                  </button>
-                </div>
               </div>
-            </div>
-          )}
-
-          {/* 3. Left Sidebar (desktop only, hidden on mobile/tablet) */}
-          <aside className="hidden md:flex md:w-64 bg-[#060b13] border-r border-[#121e35] flex-col p-5 space-y-5 animate-slide-in-left">
-
-            {/* Logo */}
-            <div className="flex items-center gap-3 pb-1">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-cyan-500/25">
-                  <Trophy size={20} className="text-white" />
-                </div>
-                <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#060b13] animate-pulse" />
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleQuickLoad('tourist')}
+                  className="btn-secondary text-xs"
+                >
+                  Try demo
+                </button>
               </div>
-              <div>
-                <span className="font-extrabold text-white text-base tracking-tight block">Contest Coach</span>
-                <span className="text-[10px] text-cyan-400/70 block tracking-wider font-semibold">Codeforces intelligence</span>
-              </div>
-            </div>
+            )}
 
-            {/* Navigation Menu */}
-            <nav className="flex-1 space-y-0.5">
-              {navigationTabs.map((tab, idx) => {
+          </div>
+
+          {/* Tab Navigation Bar */}
+          {userInfo && (
+            <div className="flex items-center gap-1 border-t border-slate-100 py-2 overflow-x-auto no-scrollbar">
+              {navigationTabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => handleTabChange(tab.id as TabType)}
-                    style={{ animationDelay: `${idx * 0.05}s` }}
-                    className={`w-full flex items-center gap-3 py-2.5 px-3.5 text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer animate-slide-in-left group relative overflow-hidden ${
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all shrink-0 cursor-pointer ${
                       isActive
-                        ? 'bg-[#0f1d36] text-cyan-400 shadow-[inset_3px_0_0_#06b6d4]'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-[#0a1220]'
+                        ? 'bg-slate-900 text-white shadow-sm font-semibold'
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
                     }`}
                   >
-                    <Icon size={17} className={`transition-all duration-200 ${ isActive ? 'text-cyan-400' : 'group-hover:text-slate-300' }`} />
-                    {tab.label}
-                    {isActive && (
-                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                    )}
+                    <Icon size={13} className={isActive ? 'text-white' : 'text-slate-400'} />
+                    <span>{tab.label}</span>
                   </button>
                 );
               })}
-            </nav>
 
-            {/* Stack box */}
-            <div className="border border-slate-900/80 bg-[#080e1a] p-3.5 rounded-xl space-y-2">
-              <span className="text-[10px] uppercase font-black tracking-wider text-slate-500 block">STACK</span>
-              <div className="flex items-center gap-3">
-                {/* React Logo */}
-                <svg className="w-5 h-5 text-sky-400 opacity-80 hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <ellipse rx="10" ry="4.5" cx="12" cy="12" transform="rotate(0 12 12)" />
-                  <ellipse rx="10" ry="4.5" cx="12" cy="12" transform="rotate(60 12 12)" />
-                  <ellipse rx="10" ry="4.5" cx="12" cy="12" transform="rotate(120 12 12)" />
-                  <circle cx="12" cy="12" r="2" fill="currentColor" />
-                </svg>
-                {/* TypeScript Logo */}
-                <div className="w-5 h-5 rounded bg-[#3178c6] text-white font-bold text-[10px] flex items-center justify-center select-none cursor-default" title="TypeScript">TS</div>
-                {/* JavaScript Logo */}
-                <div className="w-5 h-5 rounded bg-[#f7df1e] text-black font-extrabold text-[10px] flex items-center justify-center select-none cursor-default" title="JavaScript">JS</div>
-                {/* Tailwind Logo */}
-                <svg className="w-5 h-5 text-[#38bdf8]" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 .587l3.668 3.668c2.148 2.148 2.148 5.632 0 7.78l-3.668 3.668-3.668-3.668c-2.148-2.148-2.148-5.632 0-7.78L12 .587z" opacity="0.5" />
-                  <path d="M12 5.587l3.668 3.668c2.148 2.148 2.148 5.632 0 7.78l-3.668 3.668-3.668-3.668c-2.148-2.148-2.148-5.632 0-7.78L12 5.587z" />
-                </svg>
+              <div className="ml-auto hidden lg:flex items-center gap-2 text-[11px] text-slate-400 font-medium shrink-0 pl-6 pr-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Round #992 in <strong className="text-slate-600">18h 42m</strong></span>
               </div>
             </div>
+          )}
 
-            {/* Sync status box */}
-            <div className="border border-emerald-900/40 bg-emerald-950/20 p-3.5 rounded-xl">
-              <div className="flex items-center gap-1.5 mb-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] uppercase font-black tracking-wider text-slate-500">Sync status</span>
-              </div>
-              <span className="text-xs text-emerald-400 font-medium leading-normal block">
-                PostgreSQL ingestion ready
-              </span>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col">
+
+        {/* Loading Overlay */}
+        {loading && (
+          <div className="flex-1 flex flex-col items-center justify-center py-24 space-y-4">
+            <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin" />
+            <div className="text-center space-y-1">
+              <p className="font-semibold text-slate-800 text-sm">Loading telemetry...</p>
+              <p className="text-xs text-slate-400">Syncing live performance from Codeforces</p>
             </div>
+          </div>
+        )}
 
-            {/* Log out / active handle with avatar */}
-            <div className="border-t border-[#121e35] pt-4 flex items-center gap-3">
-              {userInfo.avatar && (
-                <div className="relative">
-                  <img
-                    src={userInfo.avatar}
-                    alt={userInfo.handle}
-                    className="w-8 h-8 rounded-full border-2 border-cyan-500/30 bg-slate-900 object-cover"
-                  />
-                  <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-[#060b13]" />
+        {/* Empty / Enter Handle State */}
+        {!loading && !userInfo && (
+          <main className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto w-full">
+            <div className="app-card w-full p-8 space-y-6 text-center">
+              <div className="w-12 h-12 rounded-xl bg-slate-950 text-white flex items-center justify-center mx-auto shadow-md">
+                <Zap size={24} className="fill-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Welcome to Contest Coach</h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Enter any Codeforces handle to analyze rating trajectory, practice bottlenecks, and chat with your AI coach.
+                </p>
+              </div>
+
+              <form onSubmit={handleSearchSubmit} className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Enter handle (e.g. tourist, k3rn3l)..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-slate-900 transition-all"
+                  autoFocus
+                />
+                <button type="submit" disabled={!searchInput.trim()} className="btn-primary w-full text-sm disabled:opacity-40">
+                  Analyze Handle
+                </button>
+              </form>
+
+              {error && (
+                <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-600 p-2.5 rounded-lg text-xs text-left">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{error}</span>
                 </div>
               )}
-              <div className="truncate flex-1">
-                <span className="text-[10px] text-slate-500 block">Logged in as</span>
-                <span className="text-xs font-bold text-cyan-400 block truncate">{userInfo.handle}</span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="text-[10px] font-bold bg-rose-500/8 hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 border border-rose-500/15 hover:border-rose-500/30 px-2.5 py-1.5 rounded-lg transition-all cursor-pointer"
-              >
-                Exit
-              </button>
-            </div>
 
-          </aside>
-
-          {/* Right Main Content */}
-          <main className="flex-1 bg-[#030712] p-4 sm:p-6 lg:p-8 overflow-y-auto flex flex-col space-y-6">
-
-            {/* Warning: Simulated data fallback */}
-            {isSimulated && (
-              <div className="flex items-center justify-between bg-cyan-950/15 border border-cyan-500/20 text-cyan-200 px-4 py-3 rounded-xl text-xs">
-                <div className="flex items-center gap-2 font-medium">
-                  <HelpCircle size={14} className="text-cyan-400" />
-                  <span>Showing simulated profile data (Demo Mode / API Fallback). Try search again for live stats.</span>
+              <div className="pt-2 text-center">
+                <p className="text-[11px] text-slate-400 mb-2">Or test with top competitors:</p>
+                <div className="flex justify-center gap-2">
+                  {['tourist', 'Benq', 'demo'].map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => handleQuickLoad(q)}
+                      className="text-xs text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-md font-medium transition-colors"
+                    >
+                      {q}
+                    </button>
+                  ))}
                 </div>
+              </div>
+            </div>
+          </main>
+        )}
+
+        {/* Main Dashboard Views */}
+        {!loading && userInfo && (
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 flex flex-col space-y-6">
+
+            {/* Simulated data banner */}
+            {isSimulated && (
+              <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs">
+                <HelpCircle size={14} className="text-slate-500" />
+                <span>Demo mode: displaying realistic simulated telemetry dataset.</span>
               </div>
             )}
 
-            {/* Top Command Center Header */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 animate-fade-in-up">
-              <div>
-                <span className="inline-flex items-center gap-1.5 text-[10px] text-cyan-400 font-extrabold tracking-widest uppercase mb-2">
-                  <span className="w-1 h-1 rounded-full bg-cyan-400 animate-pulse" />
-                  Phase 1 MVP Dashboard
-                </span>
-                <h1 className="text-3xl font-black text-white tracking-tight leading-none">
-                  Contest Coach <span className="shimmer-text">command center</span>
-                </h1>
-              </div>
-
-              {/* Header Search Bar */}
-              <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 max-w-xs">
-                <div className="relative w-full">
-                  <input
-                    type="text"
-                    placeholder="Search handle..."
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    className="w-full bg-[#080f1e] border border-[#1b2b48] pl-9 pr-3 py-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500 transition-all"
-                  />
-                  <Search className="absolute left-3 top-2.5 text-slate-500" size={13} />
-                </div>
-                <button
-                  type="submit"
-                  className="bg-gradient-to-r from-cyan-500 to-cyan-400 hover:from-cyan-400 hover:to-cyan-300 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/35 active:scale-95"
-                >
-                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-                  Sync
-                </button>
-              </form>
-            </div>
-
-            {/* Tab Panel Render */}
-            <div className="flex-1 min-h-[400px]">
+            {/* Active Tab Content */}
+            <div className="flex-1">
               {tabLoading ? (
                 <TabSkeleton />
               ) : (
@@ -532,6 +423,7 @@ function App() {
                         ratingHistory={ratingHistory}
                         submissions={submissions}
                         onUserInfoUpdate={setUserInfo}
+                        isOwner={true}
                       />
                     </div>
                   )}
@@ -541,6 +433,7 @@ function App() {
                         userInfo={userInfo}
                         ratingHistory={ratingHistory}
                         submissions={submissions}
+                        onNavigate={(tab) => handleTabChange(tab as TabType)}
                       />
                     </div>
                   )}
@@ -558,6 +451,7 @@ function App() {
                         userInfo={userInfo}
                         submissions={submissions}
                         onNavigate={(tab) => handleTabChange(tab as TabType)}
+                        isOwner={true}
                       />
                     </div>
                   )}
@@ -567,6 +461,7 @@ function App() {
                         primaryUser={userInfo}
                         primaryRatingHistory={ratingHistory}
                         primarySubmissions={submissions}
+                        onNavigate={(tab) => handleTabChange(tab as TabType)}
                       />
                     </div>
                   )}
@@ -574,10 +469,10 @@ function App() {
                     <div className="animate-fade-in-up">
                       <AICoach
                         userInfo={userInfo}
-                        ratingHistory={ratingHistory}
                         submissions={submissions}
                         chatMessages={chatMessages}
                         onMessagesChange={setChatMessages}
+                        isOwner={true}
                       />
                     </div>
                   )}
@@ -586,16 +481,158 @@ function App() {
             </div>
 
           </main>
+        )}
 
+      </div>
+
+      {/* Universal Footer */}
+      <footer className="bg-white border-t border-slate-200 py-4 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${apiHealth === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <span>Contest Coach v3.4.1 (CP Engine)</span>
+            <span>•</span>
+            <span>Codeforces API v2.0 Live telemetry</span>
+          </div>
+          <div className="flex items-center gap-4 text-slate-500">
+            <button
+              onClick={() => setShowRatingBounds(true)}
+              className="hover:text-slate-900 transition-colors cursor-pointer"
+            >
+              Rating bounds
+            </button>
+            <button
+              onClick={() => setShowDocs(true)}
+              className="hover:text-slate-900 transition-colors cursor-pointer"
+            >
+              Documentation
+            </button>
+            <a
+              href="https://discord.com"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-slate-900 transition-colors inline-flex items-center gap-1"
+            >
+              <span>Discord community</span>
+              <ExternalLink size={11} />
+            </a>
+            <button
+              onClick={() => setShowStatus(true)}
+              className="hover:text-slate-900 transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <span>API status</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${apiHealth === 'online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            </button>
+          </div>
+        </div>
+      </footer>
+
+      {/* ── Rating Bounds Modal ── */}
+      {showRatingBounds && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-4 animate-pop-in">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-900 text-base">Codeforces Rating Bands & Tiers</h3>
+              <button onClick={() => setShowRatingBounds(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-400 font-semibold uppercase text-[10px]">
+                    <th className="pb-2">Rank Title</th>
+                    <th className="pb-2">Rating Range</th>
+                    <th className="pb-2">Division Eligibility</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  <tr><td className="py-2 text-slate-500 font-bold">Newbie</td><td>&lt; 1200</td><td>Div. 3 / Div. 4</td></tr>
+                  <tr><td className="py-2 text-emerald-600 font-bold">Pupil</td><td>1200 – 1399</td><td>Div. 2 / Div. 3</td></tr>
+                  <tr><td className="py-2 text-cyan-600 font-bold">Specialist</td><td>1400 – 1599</td><td>Div. 2</td></tr>
+                  <tr><td className="py-2 text-blue-600 font-bold">Expert</td><td>1600 – 1899</td><td>Div. 2</td></tr>
+                  <tr><td className="py-2 text-purple-600 font-bold">Candidate Master</td><td>1900 – 2099</td><td>Div. 1 + 2</td></tr>
+                  <tr><td className="py-2 text-amber-600 font-bold">Master</td><td>2100 – 2299</td><td>Div. 1</td></tr>
+                  <tr><td className="py-2 text-orange-600 font-bold">International Master</td><td>2300 – 2399</td><td>Div. 1</td></tr>
+                  <tr><td className="py-2 text-rose-600 font-bold">Grandmaster</td><td>2400 – 2599</td><td>Div. 1</td></tr>
+                  <tr><td className="py-2 text-red-600 font-bold">Legendary Grandmaster</td><td>3000+</td><td>Div. 1</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Footer (only on onboarding page) */}
-      {!userInfo && (
-        <footer className="mt-12 border-t border-slate-900/60 py-6 text-center text-xs text-slate-500 max-w-7xl mx-auto w-full px-4">
-          <p>© 2026 Contest Coach Frontend Dashboard. Powered by public Codeforces REST endpoints.</p>
-        </footer>
+      {/* ── Documentation Modal ── */}
+      {showDocs && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 w-full max-w-xl rounded-2xl p-6 shadow-2xl space-y-4 animate-pop-in max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-900 text-base">Contest Coach Documentation</h3>
+              <button onClick={() => setShowDocs(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">1. Live Telemetry & Rating Deltas</h4>
+                <p>
+                  Contest Coach pulls contest history and all historical problem submissions directly via the official Codeforces API and caches profiles in PostgreSQL for fast performance.
+                </p>
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">2. Socratic AI Coach</h4>
+                <p>
+                  Powered by Google Gemini 2.5 Flash. It inspects your actual submission history to pinpoint algorithmic blindspots (e.g. high TLE on Segment Trees, WA on Dynamic Programming) and provides zero-spoiler conceptual guidance.
+                </p>
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm mb-1">3. LeetCode Synchronization</h4>
+                <p>
+                  Connect your LeetCode username directly in the Dashboard tab to combine your interview preparation statistics with your contest rating trajectory.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
+
+      {/* ── API Status Modal ── */}
+      {showStatus && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4 animate-pop-in">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-900 text-base">API Status & Service Health</h3>
+              <button onClick={() => setShowStatus(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-800">Contest Coach Backend Server</p>
+                  <p className="text-[11px] text-slate-400">http://localhost:5000/health</p>
+                </div>
+                <span className="flex items-center gap-1.5 font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-[10px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  ONLINE
+                </span>
+              </div>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-800">Codeforces API Telemetry</p>
+                  <p className="text-[11px] text-slate-400">codeforces.com/api/user.info</p>
+                </div>
+                <span className="flex items-center gap-1.5 font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-[10px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  ONLINE
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

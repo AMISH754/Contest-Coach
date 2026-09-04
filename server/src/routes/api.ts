@@ -1,35 +1,40 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { getCodeforcesData, syncCodeforcesProblems, generatePersonalizedTasks, askAICoach } from '../services/codeforcesService';
 import prisma from '../db';
 import { CFProblem } from '@prisma/client';
 import { fetchLeetCodeStats } from '../services/leetcodeService';
+import {
+  handleSchema,
+  toggleTaskSchema,
+  aiCoachSchema,
+  linkLeetCodeSchema
+} from './schemas';
 
 const router = Router();
 
-const CF_HANDLE_REGEX = /^[a-zA-Z0-9_\-.]{1,50}$/;
-const validateHandle = (h: string): boolean => CF_HANDLE_REGEX.test(h);
-
-// Central middleware: validates and sanitizes any route with a ':handle' param
+// Validate handle param middleware using Zod schema
 router.param('handle', (req: Request, res: Response, next, handle) => {
-  if (typeof handle !== 'string' || !validateHandle(handle)) {
+  const result = handleSchema.safeParse(handle);
+  if (!result.success) {
     res.status(400).json({
       status: 'FAILED',
-      comment: 'Invalid handle format. Use 1-50 alphanumeric characters, underscores, hyphens, or dots.'
+      comment: result.error.issues[0].message
     });
     return;
   }
   next();
 });
 
+// GET Codeforces user data (with DB cache)
 router.get('/user/:handle', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
+  const handle = req.params.handle as string;
 
-  // Optional submission count cap — default 300, max 1000
   const rawCount = parseInt(req.query.count as string);
-  const submissionCount = !isNaN(rawCount) ? Math.min(Math.max(rawCount, 1), 1000) : 300;
+  const submissionCount = !isNaN(rawCount) ? Math.min(Math.max(rawCount, 1), 20000) : 10000;
+  const force = req.query.force === 'true';
 
   try {
-    const data = await getCodeforcesData(handle as string, submissionCount);
+    const data = await getCodeforcesData(handle, submissionCount, force);
     res.json({ status: 'OK', result: data });
   } catch (error: any) {
     res.status(500).json({
@@ -41,13 +46,7 @@ router.get('/user/:handle', async (req: Request, res: Response): Promise<void> =
 
 // GET user tasks
 router.get('/user/:handle/tasks', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter must be a string' });
-    return;
-  }
-
+  const handle = req.params.handle as string;
   const normHandle = handle.toLowerCase();
 
   try {
@@ -62,23 +61,16 @@ router.get('/user/:handle/tasks', async (req: Request, res: Response): Promise<v
 
 // POST toggle task completed status
 router.post('/user/:handle/tasks/toggle', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-  const { taskId } = req.body;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter must be a string' });
+  const handle = req.params.handle as string;
+  const validated = toggleTaskSchema.safeParse(req.body);
+  if (!validated.success) {
+    res.status(400).json({ status: 'FAILED', comment: validated.error.issues[0].message });
     return;
   }
-
-  if (!taskId) {
-    res.status(400).json({ status: 'FAILED', comment: 'taskId is required in request body' });
-    return;
-  }
+  const { taskId } = validated.data;
 
   try {
-    const task = await prisma.coachTask.findUnique({
-      where: { id: taskId }
-    });
+    const task = await prisma.coachTask.findUnique({ where: { id: taskId } });
 
     if (!task || task.userHandle !== handle.toLowerCase()) {
       res.status(404).json({ status: 'FAILED', comment: 'Task not found for this user' });
@@ -96,15 +88,9 @@ router.post('/user/:handle/tasks/toggle', async (req: Request, res: Response): P
   }
 });
 
-// GET user recommended problems
+// GET recommended problems
 router.get('/user/:handle/problems/recommend', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter must be a string' });
-    return;
-  }
-
+  const handle = req.params.handle as string;
   const normHandle = handle.toLowerCase();
 
   try {
@@ -120,7 +106,6 @@ router.get('/user/:handle/problems/recommend', async (req: Request, res: Respons
 
     const currentRating = user.rating || 1200;
 
-    // Check if problems cache is empty
     const dbProblemCount = await prisma.cFProblem.count();
     if (dbProblemCount === 0) {
       console.log('[API] Problem cache is empty, triggering sync...');
@@ -142,33 +127,18 @@ router.get('/user/:handle/problems/recommend', async (req: Request, res: Respons
     });
 
     const weakTagsList = Object.keys(tagStats)
-      .map(tag => ({
-        tag,
-        ratio: tagStats[tag].ok / tagStats[tag].total,
-        total: tagStats[tag].total
-      }))
+      .map(tag => ({ tag, ratio: tagStats[tag].ok / tagStats[tag].total, total: tagStats[tag].total }))
       .filter(t => t.total >= 3 && t.ratio < 0.6)
       .sort((a, b) => a.ratio - b.ratio)
       .map(t => t.tag);
 
-    const minRating = currentRating - 100;
-    const maxRating = currentRating + 250;
-
     const candidateProblems = await prisma.cFProblem.findMany({
-      where: {
-        rating: {
-          gte: minRating,
-          lte: maxRating
-        }
-      }
+      where: { rating: { gte: currentRating - 100, lte: currentRating + 250 } }
     });
 
     const recommendations = candidateProblems
       .filter((prob: CFProblem) => !solvedProblemKeys.has(`${prob.contestId}-${prob.index}`))
-      .map((prob: CFProblem) => {
-        const weakTagMatches = prob.tags.filter(t => weakTagsList.includes(t)).length;
-        return { ...prob, weakTagMatches };
-      })
+      .map((prob: CFProblem) => ({ ...prob, weakTagMatches: prob.tags.filter(t => weakTagsList.includes(t)).length }))
       .sort((a, b) => b.weakTagMatches - a.weakTagMatches)
       .slice(0, 10);
 
@@ -180,12 +150,7 @@ router.get('/user/:handle/problems/recommend', async (req: Request, res: Respons
 
 // POST regenerate user roadmap tasks
 router.post('/user/:handle/tasks/regenerate', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter must be a string' });
-    return;
-  }
+  const handle = req.params.handle as string;
 
   try {
     const updatedTasks = await generatePersonalizedTasks(handle);
@@ -197,18 +162,13 @@ router.post('/user/:handle/tasks/regenerate', async (req: Request, res: Response
 
 // POST send message to Gemini AI Coach
 router.post('/user/:handle/ai-coach', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-  const { message, history } = req.body;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Handle parameter must be a string' });
+  const handle = req.params.handle as string;
+  const validated = aiCoachSchema.safeParse(req.body);
+  if (!validated.success) {
+    res.status(400).json({ status: 'FAILED', comment: validated.error.issues[0].message });
     return;
   }
-
-  if (!message || typeof message !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'message is required and must be a string' });
-    return;
-  }
+  const { message, history } = validated.data;
 
   try {
     const aiResponse = await askAICoach(handle, message, history || []);
@@ -220,36 +180,26 @@ router.post('/user/:handle/ai-coach', async (req: Request, res: Response): Promi
 
 // POST link LeetCode handle
 router.post('/user/:handle/leetcode/link', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-  const { leetcodeHandle } = req.body;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
+  const handle = req.params.handle as string;
+  const validated = linkLeetCodeSchema.safeParse(req.body);
+  if (!validated.success) {
+    res.status(400).json({ status: 'FAILED', comment: validated.error.issues[0].message });
     return;
   }
-
-  if (!leetcodeHandle || typeof leetcodeHandle !== 'string' || !validateHandle(leetcodeHandle)) {
-    res.status(400).json({ status: 'FAILED', comment: 'leetcodeHandle is required and must be a valid handle format.' });
-    return;
-  }
+  const { leetcodeHandle } = validated.data;
+  const normHandle = handle.toLowerCase();
 
   try {
-    // 1. Verify user exists in our DB
-    const normHandle = handle.toLowerCase();
-    const dbUser = await prisma.user.findUnique({
-      where: { handle: normHandle }
+    // Ensure user exists in DB (upsert so no prior load is required)
+    await prisma.user.upsert({
+      where: { handle: normHandle },
+      update: {},
+      create: { handle: normHandle }
     });
 
-    if (!dbUser) {
-      res.status(404).json({ status: 'FAILED', comment: `Codeforces user ${handle} not found. Load their profile first.` });
-      return;
-    }
-
-    // 2. Fetch LeetCode stats to verify handle is valid
     console.log(`[LeetCode Link] Verifying handle "${leetcodeHandle}"...`);
     const stats = await fetchLeetCodeStats(leetcodeHandle);
 
-    // 3. Save to database
     const updatedUser = await prisma.user.update({
       where: { handle: normHandle },
       data: {
@@ -280,18 +230,11 @@ router.post('/user/:handle/leetcode/link', async (req: Request, res: Response): 
 
 // POST sync LeetCode stats
 router.post('/user/:handle/leetcode/sync', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
-    return;
-  }
+  const handle = req.params.handle as string;
+  const normHandle = handle.toLowerCase();
 
   try {
-    const normHandle = handle.toLowerCase();
-    const dbUser = await prisma.user.findUnique({
-      where: { handle: normHandle }
-    });
+    const dbUser = await prisma.user.findUnique({ where: { handle: normHandle } });
 
     if (!dbUser || !dbUser.leetcodeHandle) {
       res.status(400).json({ status: 'FAILED', comment: 'No LeetCode handle linked for this user' });
@@ -330,34 +273,23 @@ router.post('/user/:handle/leetcode/sync', async (req: Request, res: Response): 
 
 // POST unlink LeetCode handle
 router.post('/user/:handle/leetcode/unlink', async (req: Request, res: Response): Promise<void> => {
-  const { handle } = req.params;
-
-  if (typeof handle !== 'string') {
-    res.status(400).json({ status: 'FAILED', comment: 'Codeforces handle is required' });
-    return;
-  }
+  const handle = req.params.handle as string;
+  const normHandle = handle.toLowerCase();
 
   try {
-    const normHandle = handle.toLowerCase();
     await prisma.user.update({
       where: { handle: normHandle },
       data: {
         leetcodeHandle: null,
         leetcodeEasy: 0,
         leetcodeMedium: 0,
-        leetcodeHard: 0
+        leetcodeHard: 0,
+        leetcodeRating: 0.0,
+        leetcodeContests: 0
       }
     });
 
-    res.json({
-      status: 'OK',
-      result: {
-        leetcodeHandle: null,
-        leetcodeEasy: 0,
-        leetcodeMedium: 0,
-        leetcodeHard: 0
-      }
-    });
+    res.json({ status: 'OK', result: { leetcodeHandle: null, leetcodeEasy: 0, leetcodeMedium: 0, leetcodeHard: 0 } });
   } catch (error: any) {
     res.status(500).json({ status: 'FAILED', comment: error.message });
   }

@@ -10,6 +10,12 @@ generator client {
 model User {
   id            Int             @id @default(autoincrement())
   handle        String          @unique
+  email         String?         @unique
+  passwordHash  String?
+  verified      Boolean         @default(false)
+  verificationCode String?
+  resetToken        String?         @unique
+  resetTokenExpires DateTime?
   leetcodeHandle String?        @unique
   leetcodeEasy   Int            @default(0)
   leetcodeMedium Int            @default(0)

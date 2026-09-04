@@ -148,7 +148,7 @@ export const getMockData = (handle: string) => {
   return { userInfo, ratingHistory, submissions };
 };
 
-export const getCodeforcesData = async (handle: string, submissionCount: number = 300) => {
+export const getCodeforcesData = async (handle: string, submissionCount: number = 10000, forceRefresh: boolean = false) => {
   const normHandle = handle.trim().toLowerCase();
   
   // 1. Check if "demo" handle is requested
@@ -166,7 +166,7 @@ export const getCodeforcesData = async (handle: string, submissionCount: number 
       }
     });
 
-    if (dbUser) {
+    if (dbUser && !forceRefresh) {
       const dbAgeSeconds = (Date.now() - dbUser.updatedAt.getTime()) / 1000;
       if (dbAgeSeconds < cacheTTL) {
         console.log(`[DB Hit] Serving cached profile from PostgreSQL for: ${handle}`);
@@ -505,7 +505,7 @@ export const generatePersonalizedTasks = async (handle: string) => {
 };
 
 // 3. Query Gemini for AI Advice
-export const askAICoach = async (handle: string, userMessage: string, chatHistory: { role: 'user' | 'model', parts: string }[] = []) => {
+export const askAICoach = async (handle: string, userMessage: string, chatHistory: { role: 'user' | 'model', parts: { text: string }[] }[] = []) => {
   const normHandle = handle.toLowerCase();
 
   const dbUser = await prisma.user.findUnique({
@@ -555,26 +555,34 @@ export const askAICoach = async (handle: string, userMessage: string, chatHistor
     .join('\n');
 
   const leetcodeStatsStr = dbUser.leetcodeHandle
-    ? `- **LeetCode Username**: ${dbUser.leetcodeHandle}\n- **LeetCode Problems Solved**: ${dbUser.leetcodeEasy} Easy, ${dbUser.leetcodeMedium} Medium, ${dbUser.leetcodeHard} Hard (total: ${dbUser.leetcodeEasy + dbUser.leetcodeMedium + dbUser.leetcodeHard})\n- **LeetCode Contest Rating**: ${dbUser.leetcodeRating > 0 ? Math.round(dbUser.leetcodeRating) : 'N/A'}\n- **LeetCode Contests Attended**: ${dbUser.leetcodeContests}`
-    : `- **LeetCode**: No LeetCode account linked.`;
+    ? `- LeetCode Username: ${dbUser.leetcodeHandle}\n- LeetCode Problems Solved: ${dbUser.leetcodeEasy} Easy, ${dbUser.leetcodeMedium} Medium, ${dbUser.leetcodeHard} Hard (total: ${dbUser.leetcodeEasy + dbUser.leetcodeMedium + dbUser.leetcodeHard})\n- LeetCode Contest Rating: ${dbUser.leetcodeRating > 0 ? Math.round(dbUser.leetcodeRating) : 'N/A'}\n- LeetCode Contests Attended: ${dbUser.leetcodeContests}`
+    : `- LeetCode: No LeetCode account linked.`;
 
   const systemPrompt = `You are the Contest Coach AI, an expert agentic AI coach for competitive programmers practicing on Codeforces and LeetCode.
 Your goal is to provide highly actionable, context-aware competitive programming advice.
 
 Here is the profile context for the user you are coaching:
-- **Handle**: ${dbUser.handle}
-- **Current Rating**: ${currentRating}
-- **Peak Rating**: ${maxRating}
-- **Current Rank**: ${rank}
-- **Recent Submissions Success Rate**: ${successRate}% (total parsed: ${totalSubmissions})
-- **Weak Topics (Identified gaps)**: ${weakTopics || 'None identified yet (need more attempts)'}
+- Handle: ${dbUser.handle}
+- Current Rating: ${currentRating}
+- Peak Rating: ${maxRating}
+- Current Rank: ${rank}
+- Recent Submissions Success Rate: ${successRate}% (total parsed: ${totalSubmissions})
+- Weak Topics (Identified gaps): ${weakTopics || 'None identified yet (need more attempts)'}
 ${leetcodeStatsStr}
-- **Recent Contest Performance History**:
+- Recent Contest Performance History:
 ${ratingChangeStr || 'No recent contest history found.'}
 
 Use this profile context to give personalized answers. If they ask for a plan, reference their weak topics or LeetCode counts. If they ask about their performance, reference their actual contest trajectory.
-Structure your answers in markdown. Keep advice practical (e.g. solve problems rated rating+100, analyze time constraints, prove greedy strategies before coding, learn specific algorithms).
-Be encouraging but realistic.`;
+Keep advice practical (e.g. solve problems rated rating+100, analyze time constraints, prove greedy strategies before coding, learn specific algorithms).
+Be encouraging but realistic.
+
+CRITICAL FORMATTING INSTRUCTIONS:
+- You must reply in 100% clean PLAIN TEXT ONLY. DO NOT use markdown under any circumstances.
+- Never use asterisks or underscores for emphasis (do NOT write **bold**, *italic*, __text__, or _text_).
+- Never use markdown heading symbols like #, ##, or ###. Use standard capitalized words or simple line breaks for headings.
+- Never use markdown bullet dashes or asterisks (* or -). Use bullet symbols like • or standard numbers like 1., 2., 3. instead.
+- Never use code backticks (\`code\`) or code fence blocks (\`\`\`).
+- Ensure the text looks natural, neatly indented, and clear when rendered directly as plain text.`;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -589,7 +597,7 @@ Be encouraging but realistic.`;
 
   const contents = chatHistory.map(h => ({
     role: h.role,
-    parts: [{ text: h.parts }]
+    parts: h.parts
   }));
 
   const chat = model.startChat({
@@ -598,6 +606,25 @@ Be encouraging but realistic.`;
 
   const result = await chat.sendMessage(userMessage);
   const response = await result.response;
-  return response.text();
+  const rawText = response.text();
+
+  // Strip any accidental markdown formatting (asterisks, hashtags, backticks, etc.)
+  const plainText = rawText
+    .replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s*(.+)$/gm, '$1')
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/___([^_]+)___/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    .replace(/^[\*\-]\s+/gm, '• ')
+    .replace(/^>\s+/gm, '')
+    .trim();
+
+  return plainText;
 };
 

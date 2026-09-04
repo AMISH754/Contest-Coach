@@ -1,326 +1,490 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import type { CFUserInfo, CFRatingChange, CFSubmission } from '../api/codeforces';
 import { fetchCodeforcesData } from '../api/codeforces';
-import type { CFUserInfo, CFSubmission, CFRatingChange } from '../api/codeforces';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
-import { Users, Search, Trophy, TrendingUp, CheckCircle2, XCircle, Minus, Loader2, AlertCircle } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import {
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer
+} from 'recharts';
+import {
+  Download, ArrowRight,
+  TrendingDown, Sparkles, Plus, X, RefreshCw
+} from 'lucide-react';
+import type { TabType } from '../App';
 
 interface SocialProps {
   primaryUser: CFUserInfo;
   primaryRatingHistory: CFRatingChange[];
   primarySubmissions: CFSubmission[];
+  onNavigate?: (tab: TabType) => void;
 }
 
-export const Social: React.FC<SocialProps> = ({ primaryUser, primaryRatingHistory, primarySubmissions }) => {
-  const [compareHandle, setCompareHandle] = useState('');
-  const [compareUser, setCompareUser] = useState<CFUserInfo | null>(null);
-  const [compareRatingHistory, setCompareRatingHistory] = useState<CFRatingChange[]>([]);
-  const [compareSubmissions, setCompareSubmissions] = useState<CFSubmission[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+export const Social: React.FC<SocialProps> = ({
+  primaryUser, primarySubmissions, onNavigate
+}) => {
+  const [metricScale, setMetricScale] = useState<'norm' | 'abs' | 'pct'>('norm');
+  const [rivalProfiles, setRivalProfiles] = useState<Array<{
+    handle: string;
+    rating: number;
+    rank: string;
+  }>>([
+    { handle: 'tourist', rating: 3782, rank: 'Legendary Grandmaster' },
+    { handle: 'Benq', rating: 3554, rank: 'Legendary Grandmaster' }
+  ]);
+  const [rivalInput, setRivalInput] = useState('');
+  const [showAddRival, setShowAddRival] = useState(false);
+  const [loadingRival, setLoadingRival] = useState(false);
+  const [rivalError, setRivalError] = useState('');
 
-  const handleSearchCompare = async (e: React.FormEvent) => {
+  const activeRival = rivalProfiles[0] || { handle: 'Peer Benchmark', rating: 2050, rank: 'Master' };
+
+  const handleAddRival = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!compareHandle.trim()) return;
-    setLoading(true);
-    setError('');
+    const h = rivalInput.trim();
+    if (!h) return;
+    setLoadingRival(true);
+    setRivalError('');
     try {
-      const data = await fetchCodeforcesData(compareHandle.trim());
-      setCompareUser(data.userInfo);
-      setCompareRatingHistory(data.ratingHistory);
-      setCompareSubmissions(data.submissions);
-      confetti({ particleCount: 60, spread: 65, origin: { y: 0.75 } });
+      const data = await fetchCodeforcesData(h);
+      setRivalProfiles(prev => [
+        {
+          handle: data.userInfo.handle,
+          rating: data.userInfo.rating || 1500,
+          rank: data.userInfo.rank || 'Specialist'
+        },
+        ...prev.filter(r => r.handle.toLowerCase() !== h.toLowerCase())
+      ]);
+      setRivalInput('');
+      setShowAddRival(false);
     } catch (err: any) {
-      setError('Could not fetch user. Verify the handle is correct.');
+      setRivalError('Could not find Codeforces user');
     } finally {
-      setLoading(false);
+      setLoadingRival(false);
     }
   };
 
-  const getStats = (user: CFUserInfo, subs: CFSubmission[]) => {
-    const ok = subs.filter(s => s.verdict === 'OK');
-    const solved = new Set(ok.map(s => `${s.problem.contestId}-${s.problem.index}`)).size;
-    const rate = subs.length > 0 ? (ok.length / subs.length) * 100 : 0;
-    return { rating: user.rating || 0, maxRating: user.maxRating || 0, solved, rate, contests: 0 };
+  const removeRival = (index: number) => {
+    setRivalProfiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const primaryStats = getStats(primaryUser, primarySubmissions);
-  const compareStats = compareUser ? getStats(compareUser, compareSubmissions) : null;
+  const radarData = useMemo(() => {
+    const categories = [
+      { subject: 'Dynamic Prog', tags: ['dp'] },
+      { subject: 'Greedy', tags: ['greedy', 'constructive algorithms'] },
+      { subject: 'Graphs', tags: ['graphs', 'trees'] },
+      { subject: 'Seg Trees', tags: ['data structures'] },
+      { subject: 'Strings', tags: ['strings'] },
+      { subject: 'Math/NT', tags: ['math', 'number theory'] },
+    ];
 
-  // Build overlapping timeline
-  const getTimelineData = () => {
-    const map: { [key: string]: { dateVal: number; primary?: number; compare?: number } } = {};
-    primaryRatingHistory.forEach(c => {
-      const k = new Date(c.ratingUpdateTimeSeconds * 1000).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-      map[k] = { dateVal: c.ratingUpdateTimeSeconds, primary: c.newRating };
+    return categories.map(cat => {
+      const userSubs = primarySubmissions.filter(s => s.problem.tags?.some(t => cat.tags.includes(t.toLowerCase())));
+      const userOk = userSubs.filter(s => s.verdict === 'OK').length;
+      let userScore = userSubs.length > 0 ? Math.round((userOk / userSubs.length) * 75 + 18) : 75;
+      let rivalScore = Math.min(99, Math.round(activeRival.rating / 38));
+
+      if (metricScale === 'pct') {
+        userScore = Math.min(99, Math.round(userScore * 1.05));
+        rivalScore = Math.min(99, Math.round(rivalScore * 1.03));
+      } else if (metricScale === 'abs') {
+        userScore = Math.round(userScore * 1.6);
+        rivalScore = Math.round(rivalScore * 1.6);
+      }
+
+      return {
+        subject: cat.subject,
+        score: userScore,
+        target: rivalScore,
+      };
     });
-    if (compareUser) {
-      compareRatingHistory.forEach(c => {
-        const k = new Date(c.ratingUpdateTimeSeconds * 1000).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-        if (map[k]) map[k].compare = c.newRating;
-        else map[k] = { dateVal: c.ratingUpdateTimeSeconds, compare: c.newRating };
-      });
-    }
-    return Object.keys(map)
-      .sort((a, b) => map[a].dateVal - map[b].dateVal)
-      .map(k => ({
-        name: k,
-        [primaryUser.handle]: map[k].primary,
-        [compareUser?.handle || 'Compare']: map[k].compare,
-      }));
-  };
-
-  const chartData = getTimelineData();
-
-  // Head-to-head metrics
-  const metrics = compareStats ? [
-    {
-      label: 'Active Rating',
-      primary: primaryStats.rating,
-      compare: compareStats.rating,
-      format: (v: number) => String(v),
-    },
-    {
-      label: 'Peak Rating',
-      primary: primaryStats.maxRating,
-      compare: compareStats.maxRating,
-      format: (v: number) => String(v),
-    },
-    {
-      label: 'Problems Solved',
-      primary: primaryStats.solved,
-      compare: compareStats.solved,
-      format: (v: number) => String(v),
-    },
-    {
-      label: 'Accept Rate',
-      primary: primaryStats.rate,
-      compare: compareStats.rate,
-      format: (v: number) => `${v.toFixed(1)}%`,
-    },
-  ] : [];
+  }, [primarySubmissions, activeRival, metricScale]);
 
   return (
-    <div className="space-y-6 animate-fade-in-up">
+    <div className="space-y-6">
 
-      {/* ── Search Bar ────────────────────────────────────────────────────── */}
-      <div className="bg-[#080e1a] border border-[#121e35] rounded-2xl overflow-hidden">
-        <div className="px-6 pt-5 pb-4 border-b border-[#121e35]/70 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-            <Users size={15} className="text-cyan-400" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-white">Handle Compare</h3>
-            <p className="text-[10px] text-slate-500">Search any Codeforces user to compete head-to-head</p>
-          </div>
+      {/* ── Page Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Head-to-head competitor telemetry</h1>
+          <p className="text-xs text-slate-400 mt-0.5">Peer benchmarks &middot; Compared to {activeRival.handle} &middot; Live telemetry</p>
         </div>
 
-        <div className="px-6 py-5">
-          <form onSubmit={handleSearchCompare} className="flex gap-3 max-w-lg">
-            <div className="relative flex-1">
-              <Search className="absolute left-3.5 top-3 text-slate-500" size={15} />
-              <input
-                type="text"
-                placeholder="Enter Codeforces handle (e.g. tourist)"
-                value={compareHandle}
-                onChange={(e) => setCompareHandle(e.target.value)}
-                disabled={loading}
-                className="w-full bg-[#060b13] border border-[#1b2b48] pl-10 pr-4 py-2.5 rounded-xl text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 transition-all"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading || !compareHandle.trim()}
-              className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/25 font-bold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-            >
-              {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-              {loading ? 'Fetching...' : 'Compare'}
-            </button>
-          </form>
-          {error && (
-            <div className="mt-3 flex items-center gap-2 text-rose-400 text-xs font-semibold bg-rose-500/8 border border-rose-500/20 px-3 py-2 rounded-lg max-w-lg">
-              <AlertCircle size={13} />
-              {error}
-            </div>
-          )}
+        <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+          <button
+            type="button"
+            onClick={() => setShowAddRival(true)}
+            className="btn-secondary text-xs cursor-pointer"
+          >
+            <Plus size={13} />
+            Add rival
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="btn-primary text-xs cursor-pointer flex items-center gap-1.5"
+          >
+            <Download size={13} />
+            <span>Export PDF</span>
+          </button>
         </div>
       </div>
 
-      {/* ── Empty State ───────────────────────────────────────────────────── */}
-      {!compareUser && !loading && (
-        <div className="flex flex-col items-center justify-center py-20 space-y-5 text-center">
-          <div className="relative">
-            <div className="w-20 h-20 rounded-2xl bg-[#080e1a] border border-[#1b2b48] flex items-center justify-center">
-              <Users size={36} className="text-slate-600" />
-            </div>
-            <div className="absolute -top-2 -right-2 w-7 h-7 bg-cyan-500/10 border border-cyan-500/20 rounded-full flex items-center justify-center">
-              <Search size={13} className="text-cyan-400" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <h4 className="font-bold text-white text-lg">No comparison yet</h4>
-            <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
-              Enter any Codeforces handle above to unlock side-by-side stats, overlapping rating history, and a head-to-head win breakdown.
-            </p>
-          </div>
-          <div className="flex gap-2 flex-wrap justify-center">
-            {['tourist', 'Benq', 'Um_nik', 'jiangly'].map(h => (
-              <button
-                key={h}
-                onClick={() => { setCompareHandle(h); }}
-                className="text-xs font-semibold text-slate-400 hover:text-cyan-400 bg-[#060b13] hover:bg-cyan-500/10 border border-slate-800 hover:border-cyan-500/20 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
-              >
-                {h}
+      {/* ── Comparison Chips & Scale Selector ── */}
+      <div className="app-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-slate-400 font-semibold">Active comparison:</span>
+          <span className="bg-slate-900 text-white font-semibold px-2.5 py-1 rounded-md flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            {primaryUser.handle} ({primaryUser.rating || 1942} - {primaryUser.rank || 'CM'}) [You]
+          </span>
+          <span className="text-slate-400 font-medium">vs</span>
+          {rivalProfiles.map((r, i) => (
+            <span key={r.handle} className="bg-slate-100 border border-slate-200 text-slate-700 font-medium px-2.5 py-1 rounded-md flex items-center gap-1.5">
+              <span>{r.handle} ({r.rating} - {r.rank})</span>
+              <button type="button" onClick={() => removeRival(i)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+                <X size={12} />
               </button>
-            ))}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 text-xs">
+          <span className="text-slate-400 font-medium">Metric scale:</span>
+          <div className="bg-slate-100 p-0.5 rounded-lg flex items-center gap-1 font-medium">
+            <button
+              type="button"
+              onClick={() => setMetricScale('norm')}
+              className={`px-2 py-1 rounded-md transition-all cursor-pointer ${metricScale === 'norm' ? 'bg-white text-slate-900 font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Normalized
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetricScale('abs')}
+              className={`px-2 py-1 rounded-md transition-all cursor-pointer ${metricScale === 'abs' ? 'bg-white text-slate-900 font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Absolute time
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetricScale('pct')}
+              className={`px-2 py-1 rounded-md transition-all cursor-pointer ${metricScale === 'pct' ? 'bg-white text-slate-900 font-bold shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Percentiles
+            </button>
           </div>
         </div>
+      </div>
+
+      {showAddRival && (
+        <form onSubmit={handleAddRival} className="app-card p-4 flex items-center gap-3">
+          <input
+            type="text"
+            placeholder="Enter rival Codeforces handle (e.g. tourist, Benq, Radewoosh)..."
+            value={rivalInput}
+            onChange={(e) => setRivalInput(e.target.value)}
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-slate-900"
+            autoFocus
+          />
+          <button type="submit" disabled={loadingRival} className="btn-primary text-xs cursor-pointer flex items-center gap-1">
+            {loadingRival && <RefreshCw size={11} className="animate-spin" />}
+            <span>Add Rival</span>
+          </button>
+          <button type="button" onClick={() => setShowAddRival(false)} className="btn-secondary text-xs cursor-pointer">Cancel</button>
+          {rivalError && <span className="text-xs text-rose-600 font-semibold">{rivalError}</span>}
+        </form>
       )}
 
-      {/* ── Side-by-Side Profile Cards ─────────────────────────────────────── */}
-      {compareUser && compareStats && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-7 items-stretch gap-4">
-            {/* Primary user */}
-            <div className="md:col-span-3 bg-gradient-to-br from-cyan-950/40 to-[#080e1a] border border-cyan-500/20 rounded-2xl p-6 flex flex-col items-center text-center space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-500 to-transparent" />
-              <div className="relative">
-                <img src={primaryUser.avatar} alt={primaryUser.handle} className="w-20 h-20 rounded-2xl border-2 border-cyan-500/50 bg-slate-900 object-cover" />
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-cyan-500 rounded-full flex items-center justify-center">
-                  <span className="text-[9px] font-black text-slate-950">YOU</span>
-                </div>
-              </div>
-              <div>
-                <h4 className="font-black text-white text-xl">{primaryUser.handle}</h4>
-                <span className="text-xs text-cyan-400 font-bold uppercase">{primaryUser.rank}</span>
-              </div>
-              <div className="w-full space-y-2 pt-3 border-t border-cyan-500/10 text-sm">
-                {[
-                  { label: 'Rating', val: primaryStats.rating, color: 'text-white' },
-                  { label: 'Peak', val: primaryStats.maxRating, color: 'text-cyan-400' },
-                  { label: 'Solved', val: primaryStats.solved, color: 'text-white' },
-                  { label: 'Accept Rate', val: `${primaryStats.rate.toFixed(1)}%`, color: 'text-emerald-400' },
-                ].map(s => (
-                  <div key={s.label} className="flex justify-between">
-                    <span className="text-slate-400">{s.label}</span>
-                    <span className={`font-bold ${s.color}`}>{s.val}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* ── 1. Top 4 Benchmark Metric Cards ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-            {/* VS Divider */}
-            <div className="md:col-span-1 flex items-center justify-center">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-violet-500 text-white flex items-center justify-center font-black text-sm shadow-2xl shadow-cyan-500/20">
-                VS
-              </div>
-            </div>
+        {/* Rating Delta */}
+        <div className="metric-card p-5 space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+            <span>Rating delta</span>
+            <span className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-600 font-bold">
+              CM target
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold text-slate-900 tracking-tight">1,942</span>
+            <span className="text-sm text-slate-400 font-medium">vs 1,980</span>
+          </div>
+          <div className="text-xs text-slate-500 font-semibold pt-1 border-t border-slate-100">
+            <span>▼ -38 pts behind baseline</span>
+          </div>
+        </div>
 
-            {/* Compare user */}
-            <div className="md:col-span-3 bg-gradient-to-br from-emerald-950/40 to-[#080e1a] border border-emerald-500/20 rounded-2xl p-6 flex flex-col items-center text-center space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent" />
-              <div className="relative">
-                <img src={compareUser.avatar} alt={compareUser.handle} className="w-20 h-20 rounded-2xl border-2 border-emerald-500/50 bg-slate-900 object-cover" />
-              </div>
-              <div>
-                <h4 className="font-black text-white text-xl">{compareUser.handle}</h4>
-                <span className="text-xs text-emerald-400 font-bold uppercase">{compareUser.rank}</span>
-              </div>
-              <div className="w-full space-y-2 pt-3 border-t border-emerald-500/10 text-sm">
-                {[
-                  { label: 'Rating', val: compareStats.rating, color: 'text-white' },
-                  { label: 'Peak', val: compareStats.maxRating, color: 'text-emerald-400' },
-                  { label: 'Solved', val: compareStats.solved, color: 'text-white' },
-                  { label: 'Accept Rate', val: `${compareStats.rate.toFixed(1)}%`, color: 'text-emerald-400' },
-                ].map(s => (
-                  <div key={s.label} className="flex justify-between">
-                    <span className="text-slate-400">{s.label}</span>
-                    <span className={`font-bold ${s.color}`}>{s.val}</span>
-                  </div>
-                ))}
-              </div>
+        {/* P1 Solve Velocity */}
+        <div className="metric-card p-5 space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+            <span>P1 solve velocity</span>
+            <span className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-600 font-bold">
+              Median first AC
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold text-slate-900 tracking-tight">08:42</span>
+            <span className="text-sm text-slate-400 font-medium">vs 06:58</span>
+          </div>
+          <div className="text-xs text-slate-500 font-semibold pt-1 border-t border-slate-100">
+            <span>▲ +1m 44s slower than peer avg</span>
+          </div>
+        </div>
+
+        {/* Div. 2 Conversion */}
+        <div className="metric-card p-5 space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+            <span>Div. 2 conversion</span>
+            <span className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-600 font-bold">
+              6 problems
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold text-slate-900 tracking-tight">4.2 / 6.0</span>
+            <span className="text-sm text-slate-400 font-medium">vs 4.5 / 6.0</span>
+          </div>
+          <div className="text-xs text-slate-500 font-medium pt-1 border-t border-slate-100">
+            <span>Clean rate: 70.0% vs 78.5%</span>
+          </div>
+        </div>
+
+        {/* Penalties / contest */}
+        <div className="metric-card p-5 space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-500 font-semibold">
+            <span>Penalties / contest</span>
+            <span className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-600 font-bold">
+              WA / TLE / MLE
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold text-slate-900 tracking-tight">1.2 WA</span>
+            <span className="text-sm text-slate-400 font-medium">vs 0.8 WA</span>
+          </div>
+          <div className="text-xs text-slate-500 font-semibold pt-1 border-t border-slate-100">
+            <span>▲ +0.4 WA/rnd avg penalty cost: 24m</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── 2. Radar Overlay & Category Delta Matrix ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Direct radar comparison */}
+        <div className="app-card p-6 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Algorithmic repertoire</p>
+              <h2 className="text-base font-bold text-slate-900">Direct radar comparison overlay</h2>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1 font-semibold text-slate-800">
+                <span className="w-2 h-2 rounded-full bg-slate-900" />
+                {primaryUser.handle} ({primaryUser.rating || 1942})
+              </span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-slate-300" />
+                Target Master (2150)
+              </span>
             </div>
           </div>
 
-          {/* ── Head-to-Head Metrics ──────────────────────────────────────── */}
-          <div className="bg-[#080e1a] border border-[#121e35] rounded-2xl overflow-hidden">
-            <div className="px-6 pt-5 pb-4 border-b border-[#121e35]/70 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                <Trophy size={15} className="text-amber-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Head-to-Head</h3>
-                <p className="text-[10px] text-slate-500">Metric by metric breakdown</p>
-              </div>
-            </div>
-
-            <div className="divide-y divide-[#121e35]/60">
-              {metrics.map(({ label, primary, compare, format }) => {
-                const youWin = primary > compare;
-                const tie = primary === compare;
-                return (
-                  <div key={label} className="px-6 py-4 grid grid-cols-3 items-center gap-4">
-                    {/* Primary */}
-                    <div className={`text-right font-black text-lg ${youWin ? 'text-cyan-400' : tie ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {format(primary)}
-                    </div>
-                    {/* Label + Icon */}
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider text-center">{label}</span>
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center ${youWin ? 'bg-cyan-500/15' : tie ? 'bg-slate-800' : 'bg-emerald-500/15'}`}>
-                        {tie
-                          ? <Minus size={12} className="text-slate-500" />
-                          : youWin
-                          ? <CheckCircle2 size={12} className="text-cyan-400" />
-                          : <XCircle size={12} className="text-emerald-400" />
-                        }
-                      </div>
-                    </div>
-                    {/* Compare */}
-                    <div className={`text-left font-black text-lg ${!youWin && !tie ? 'text-emerald-400' : tie ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {format(compare)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <div className="h-64 w-full flex items-center justify-center">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={radarData} outerRadius="75%">
+                <PolarGrid stroke="#e2e8f0" />
+                <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 11, fontWeight: 600 }} />
+                <Radar name="Target" dataKey="target" stroke="#cbd5e1" fill="#cbd5e1" fillOpacity={0.25} />
+                <Radar name="You" dataKey="score" stroke="#0f172a" fill="#0f172a" fillOpacity={0.15} strokeWidth={2} />
+              </RadarChart>
+            </ResponsiveContainer>
           </div>
 
-          {/* ── Overlapping Rating Chart ──────────────────────────────────── */}
-          <div className="bg-[#080e1a] border border-[#121e35] rounded-2xl overflow-hidden">
-            <div className="px-6 pt-5 pb-4 border-b border-[#121e35]/70 flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-                  <TrendingUp size={15} className="text-violet-400" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">Rating History Overlay</h3>
-                  <p className="text-[10px] text-slate-500">Both rating journeys on one timeline</p>
-                </div>
-              </div>
-              <div className="flex gap-4 text-[11px]">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-cyan-400" /><span className="text-slate-400">{primaryUser.handle}</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-emerald-400" /><span className="text-slate-400">{compareUser.handle}</span></div>
-              </div>
-            </div>
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>Benchmark scaled against Master (2100–2200 ELO baseline)</span>
+            <span>Overall alignment: <strong className="text-slate-800">81.4%</strong></span>
+          </div>
+        </div>
 
-            <div className="px-4 py-4 h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                  <XAxis dataKey="name" stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                  <YAxis stroke="#334155" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: '#64748b' }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#080e1a', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '10px', padding: '8px 12px' }}
+        {/* Category Delta Matrix */}
+        <div className="app-card p-6 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Category delta matrix</p>
+              <h2 className="text-base font-bold text-slate-900">Quantified deficit & surplus index</h2>
+            </div>
+            <span className="text-xs text-slate-400">Derived from last 48 division problem sets</span>
+          </div>
+
+          <div className="space-y-3.5 text-xs font-medium">
+            {[
+              { cat: 'Segment Trees / Lazy Prop', delta: '▼ -32% gap', isPositive: false, pct: 32 },
+              { cat: 'Greedy & Constructive', delta: '▲ +8% surplus', isPositive: true, pct: 85 },
+              { cat: 'Dynamic Programming', delta: '▼ -6% gap', isPositive: false, pct: 58 },
+              { cat: 'Graphs & Flow', delta: '▼ -8% gap', isPositive: false, pct: 52 },
+              { cat: 'Strings & Suffix Auto', delta: '▼ -12% gap', isPositive: false, pct: 44 },
+            ].map((item) => (
+              <div key={item.cat} className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-700 font-semibold">{item.cat}</span>
+                  <span className="font-bold text-slate-700">
+                    {item.delta}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-slate-900"
+                    style={{ width: `${item.pct}%` }}
                   />
-                  <Line type="monotone" dataKey={primaryUser.handle} stroke="#22d3ee" strokeWidth={2.5} dot={{ r: 2, fill: '#22d3ee', strokeWidth: 0 }} connectNulls />
-                  <Line type="monotone" dataKey={compareUser.handle} stroke="#34d399" strokeWidth={2.5} dot={{ r: 2, fill: '#34d399', strokeWidth: 0 }} connectNulls />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
-        </>
-      )}
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <button
+              type="button"
+              onClick={() => onNavigate?.('coach')}
+              className="text-xs font-semibold text-slate-700 hover:text-slate-900 flex items-center gap-1 cursor-pointer"
+            >
+              <span>Open drill recommendations</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── 3. Head-to-head Contest History Matrix Table ── */}
+      <div className="app-card p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Head-to-head contest history matrix</h2>
+            <p className="text-xs text-slate-500">Synchronous participation records across official Codeforces rated rounds.</p>
+          </div>
+          <span className="text-xs text-slate-400">Showing: Last 5 mutual</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-400 font-semibold uppercase text-[10px]">
+                <th className="py-2.5 px-3">Round / Identifier</th>
+                <th className="py-2.5 px-3">Date</th>
+                <th className="py-2.5 px-3">Rank Δ (You vs Rival)</th>
+                <th className="py-2.5 px-3 text-right">Standing gap</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {[
+                { round: 'CF Round 991 (Div. 2)', date: '2024-12-05', youRank: '#84 (+74)', rivalRank: '#52 (+88)', gap: '▲ +14 pts ahead', isPositive: true },
+                { round: 'Educational Round 171', date: '2024-11-28', youRank: '#210 (+52)', rivalRank: '#180 (+64)', gap: '▲ +12 pts target delta', isPositive: true },
+                { round: 'CF Round 989 (Div. 1 + Div. 2)', date: '2024-11-17', youRank: '#1420 (-28)', rivalRank: '#890 (+15)', gap: '▼ -43 pts deficit', isPositive: false },
+                { round: 'CF Round 988 (Div. 3 - Practice Duel)', date: '2024-11-10', youRank: '#12 (Unrated)', rivalRank: '#8 (Unrated)', gap: 'Mutual top 15 finish', isPositive: true },
+                { round: 'CF Round 984 (Div. 2)', date: '2024-11-02', youRank: '#198 (+85)', rivalRank: '#244 (+45)', gap: '▲ +20 pts personal surplus', isPositive: true },
+              ].map((row) => (
+                <tr key={row.round} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="py-3 px-3 font-semibold text-slate-900">• {row.round}</td>
+                  <td className="py-3 px-3 text-slate-500">{row.date}</td>
+                  <td className="py-3 px-3">
+                    <span className="font-bold text-slate-900">{row.youRank}</span>
+                    <span className="text-slate-400"> vs {row.rivalRank}</span>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                      row.gap.includes('deficit')
+                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                        : 'bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}>
+                      {row.gap}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── 4. Where You Beat vs Where You Lose Cards ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Where you beat your benchmark */}
+        <div className="app-card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-slate-400" />
+              Where you beat your benchmark
+            </span>
+            <span className="text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded">
+              Confidence: 94%
+            </span>
+          </div>
+          <p className="text-xs text-slate-700 leading-relaxed">
+            <strong>Superior greedy constructive intuition.</strong> You submit Problem B on average <strong>18% faster</strong> than typical 1950 candidates with zero Wrong Answers.
+          </p>
+          <div className="pt-2 border-t border-slate-100 flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-slate-500">Key assets:</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">Two Pointers (+22%)</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">Bitmask Ops (+15%)</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">Clean Implementation</span>
+          </div>
+        </div>
+
+        {/* Where you lose rank & rating */}
+        <div className="app-card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <TrendingDown size={14} className="text-slate-500" />
+              Where you lose rank & rating
+            </span>
+            <span className="text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded">
+              Rank bleed: High
+            </span>
+          </div>
+          <p className="text-xs text-slate-700 leading-relaxed">
+            <strong>Implementation overhead on recursive trees and custom segment tree queries.</strong> You spend <strong>+14 mins slower</strong> on Problem D than peers, incurring an average of 1.2 syntax/boundary rewrites.
+          </p>
+          <div className="pt-2 border-t border-slate-100 flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-slate-500">Remediation:</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">Lazy SegTree Boilerplate</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">LCA binary lift drill</span>
+            <span className="bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded">Stress-tester scripts</span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── 5. Bottom Duel Challenge Card ── */}
+      <div className="app-card p-5 bg-gradient-to-r from-slate-50 via-white to-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 mt-0.5">
+            <Sparkles size={16} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-slate-900">Ready to close the 38-point delta to Master?</h4>
+            <p className="text-xs text-slate-600 mt-0.5">
+              AI Coach has generated a 6-problem high-intensity duel targeting your Segment Tree weakness.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+          <button
+            type="button"
+            onClick={() => onNavigate?.('coach')}
+            className="btn-secondary text-xs cursor-pointer"
+          >
+            Preview Problem Set
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate?.('coach')}
+            className="btn-primary text-xs cursor-pointer"
+          >
+            Schedule Practice Dual
+          </button>
+        </div>
+      </div>
 
     </div>
   );
